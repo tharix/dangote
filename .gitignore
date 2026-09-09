@@ -1,0 +1,15 @@
+# Operating-system and editor files
+.DS_Store
+Thumbs.db
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+
+# Dependencies and generated output
+node_modules/
+coverage/
+dist/
+*.log
+
+# Local browser state
+.local-storage/

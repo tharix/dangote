@@ -1,0 +1,12 @@
+{
+  "name": "dangote-electrical-academy",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Production-ready static training workspace for electrical engineering education.",
+  "scripts": {
+    "test": "node --test tests/core.test.js"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
