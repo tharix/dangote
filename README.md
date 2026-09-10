@@ -41,3 +41,7 @@ Use short branches and pull requests. Keep calculation logic in `core.js`, UI wi
 ## Deployment
 
 The [Deploy static app](./.github/workflows/deploy-pages.yml) workflow publishes the repository through GitHub Pages. Enable Pages with **GitHub Actions** as the source in repository settings.
+
+Production site: [https://tharix.github.io/dangote/](https://tharix.github.io/dangote/)
+
+The current `main` deployment and quality-check workflow runs are green. Keep `main` protected in GitHub so changes arrive through reviewed pull requests.
