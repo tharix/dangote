@@ -13,6 +13,11 @@ let lastCalculation = null;
 let componentId = 0;
 let isSimulating = false;
 let restoringBOQ = false;
+let connectMode = false;
+let pendingConnection = null;
+let circuitConnections = [];
+let simulationSeconds = 0;
+let simulationTimer = null;
 
 const componentCatalog = [
   { name: 'Miniature circuit breaker', category: 'protection', icon: 'fa-toggle-on', description: 'Protects final circuits from overload and short circuit conditions.', tags: ['Type C', '1-63 A'] },
@@ -248,15 +253,21 @@ function exportPdf() {
 
 function createComponent(type, x, y) {
   const id = `component-${componentId++}`;
-  const labels = { 'source-ac': ['AC mains', '∿'], battery: ['Battery', '＋'], mcb: ['MCB', 'M'], 'switch-1way': ['Switch', '╱'], lamp: ['Lamp', '◉'], motor: ['Motor', 'M'] };
+  const labels = { 'source-ac': ['AC mains', '∿'], battery: ['Battery', '＋'], mcb: ['MCB', 'M'], rcd: ['RCD', 'R'], 'switch-1way': ['Switch', '╱'], lamp: ['Lamp', '◉'], socket: ['Socket', 'S'], motor: ['Motor', 'M'] };
   const [label, symbol] = labels[type] || [type, '?'];
   const element = document.createElement('div');
-  element.className = 'circuit-component'; element.id = id; element.dataset.type = type; element.dataset.state = type === 'mcb' ? 'on' : 'off'; element.draggable = true; element.style.left = `${Math.max(0, x)}px`; element.style.top = `${Math.max(0, y)}px`;
+  element.className = 'circuit-component'; element.id = id; element.dataset.type = type; element.dataset.state = ['mcb', 'rcd'].includes(type) ? 'on' : 'off'; element.draggable = true; element.style.left = `${Math.max(0, x)}px`; element.style.top = `${Math.max(0, y)}px`;
   element.innerHTML = `<div class="component-symbol">${symbol}</div><span class="component-label">${label}</span><button class="remove-component" aria-label="Remove component"><i class="fa-solid fa-xmark"></i></button>`;
   element.addEventListener('dragstart', event => { const rect = element.getBoundingClientRect(); event.dataTransfer.setData('existing-id', id); event.dataTransfer.setData('offset-x', event.clientX - rect.left); event.dataTransfer.setData('offset-y', event.clientY - rect.top); });
-  element.addEventListener('click', event => { if (event.target.closest('.remove-component')) { element.remove(); checkCircuitLogic(); return; } if (type === 'switch-1way' || type === 'mcb') { element.dataset.state = element.dataset.state === 'on' ? 'off' : 'on'; checkCircuitLogic(); } });
+  element.addEventListener('click', event => {
+    if (event.target.closest('.remove-component')) { removeComponent(id); return; }
+    if (connectMode) { selectConnectionEndpoint(id); return; }
+    if (['switch-1way', 'mcb', 'rcd'].includes(type)) { element.dataset.state = element.dataset.state === 'on' ? 'off' : 'on'; checkCircuitLogic(); }
+  });
   $('#circuit-canvas').appendChild(element);
   $('#canvas-instruction')?.remove();
+  updateCircuitSummary();
+  return id;
 }
 
 function dropComponent(event) {
@@ -265,17 +276,141 @@ function dropComponent(event) {
   const existingId = event.dataTransfer.getData('existing-id');
   const x = Math.round((event.clientX - rect.left - (Number(event.dataTransfer.getData('offset-x')) || 0)) / 20) * 20;
   const y = Math.round((event.clientY - rect.top - (Number(event.dataTransfer.getData('offset-y')) || 0)) / 20) * 20;
-  if (existingId) { const item = $(`#${existingId}`); if (item) { item.style.left = `${Math.max(0, x)}px`; item.style.top = `${Math.max(0, y)}px`; } return; }
+  if (existingId) { const item = $(`#${existingId}`); if (item) { item.style.left = `${Math.max(0, x)}px`; item.style.top = `${Math.max(0, y)}px`; renderCircuitWires(); } return; }
   const type = event.dataTransfer.getData('type'); if (type) createComponent(type, x, y);
+}
+
+function removeComponent(id) {
+  circuitConnections = circuitConnections.filter(connection => connection.from !== id && connection.to !== id);
+  $(`#${id}`)?.remove();
+  pendingConnection = null;
+  renderCircuitWires();
+  updateCircuitSummary();
+  checkCircuitLogic();
+}
+
+function selectConnectionEndpoint(id) {
+  if (!pendingConnection) {
+    pendingConnection = id;
+    $(`#${id}`).classList.add('connection-selected');
+    showToast('Select a second component to create a wire.');
+    return;
+  }
+  if (pendingConnection === id) return;
+  const duplicate = circuitConnections.some(connection => (connection.from === pendingConnection && connection.to === id) || (connection.from === id && connection.to === pendingConnection));
+  if (!duplicate) circuitConnections.push({ from: pendingConnection, to: id });
+  $$('.connection-selected').forEach(item => item.classList.remove('connection-selected'));
+  pendingConnection = null;
+  renderCircuitWires();
+  updateCircuitSummary();
+  checkCircuitLogic();
+}
+
+function renderCircuitWires() {
+  const svg = $('#circuit-wires');
+  if (!svg) return;
+  const canvas = $('#circuit-canvas');
+  svg.setAttribute('width', canvas.scrollWidth);
+  svg.setAttribute('height', canvas.scrollHeight);
+  svg.innerHTML = circuitConnections.map((connection, index) => {
+    const from = $(`#${connection.from}`);
+    const to = $(`#${connection.to}`);
+    if (!from || !to) return '';
+    const x1 = from.offsetLeft + from.offsetWidth / 2;
+    const y1 = from.offsetTop + from.offsetHeight / 2;
+    const x2 = to.offsetLeft + to.offsetWidth / 2;
+    const y2 = to.offsetTop + to.offsetHeight / 2;
+    return `<line class="circuit-wire" data-connection="${index}" x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}"></line>`;
+  }).join('');
+}
+
+function updateCircuitSummary() {
+  $('#circuit-component-count').textContent = $$('.circuit-component').length;
+  $('#circuit-connection-count').textContent = circuitConnections.length;
+}
+
+function validateCircuit() {
+  const components = $$('.circuit-component');
+  const types = components.map(item => item.dataset.type);
+  const source = components.find(item => ['source-ac', 'battery'].includes(item.dataset.type));
+  const loads = components.filter(item => ['lamp', 'socket', 'motor'].includes(item.dataset.type));
+  const protectedTypes = ['mcb', 'rcd'];
+  const hasProtection = components.some(item => protectedTypes.includes(item.dataset.type));
+  const graph = new Map(components.map(item => [item.id, []]));
+  circuitConnections.forEach(connection => { graph.get(connection.from)?.push(connection.to); graph.get(connection.to)?.push(connection.from); });
+  const reachable = new Set(source ? [source.id] : []);
+  const queue = source ? [source.id] : [];
+  while (queue.length) graph.get(queue.shift()).forEach(id => { if (!reachable.has(id)) { reachable.add(id); queue.push(id); } });
+  const connectedLoad = loads.some(load => reachable.has(load.id));
+  const complete = Boolean(source && loads.length && hasProtection && connectedLoad && circuitConnections.length >= components.length - 1);
+  const message = !source ? 'Add a source.' : !loads.length ? 'Add at least one load.' : !hasProtection ? 'Add an MCB or RCD.' : !connectedLoad ? 'Connect the source path to a load.' : complete ? 'Topology is complete for this training exercise.' : 'Connect every component into one circuit path.';
+  $('#circuit-validation').textContent = complete ? 'Circuit valid' : 'Review required';
+  $('#circuit-validation').className = complete ? 'validation-good' : 'validation-warning';
+  $('#circuit-message').textContent = message;
+  return complete;
+}
+
+function serialiseCircuit() {
+  return {
+    version: 1,
+    components: $$('.circuit-component').map(item => ({ id: item.id, type: item.dataset.type, state: item.dataset.state, left: parseInt(item.style.left, 10), top: parseInt(item.style.top, 10) })),
+    connections: circuitConnections.map(connection => ({ ...connection }))
+  };
+}
+
+function restoreCircuit(data) {
+  if (!data || data.version !== 1 || !Array.isArray(data.components) || !Array.isArray(data.connections)) throw new Error('Unsupported circuit file.');
+  $('#circuit-canvas').querySelectorAll('.circuit-component').forEach(item => item.remove());
+  circuitConnections = [];
+  const ids = data.components.map(item => createComponent(item.type, item.left, item.top));
+  const idMap = new Map(data.components.map((item, index) => [item.id, ids[index]]));
+  data.components.forEach((item, index) => { const element = $(`#${ids[index]}`); if (element) element.dataset.state = item.state || element.dataset.state; });
+  data.connections.forEach(connection => {
+    if (idMap.has(connection.from) && idMap.has(connection.to)) {
+      circuitConnections.push({ from: idMap.get(connection.from), to: idMap.get(connection.to) });
+    }
+  });
+  renderCircuitWires();
+  updateCircuitSummary();
+  validateCircuit();
+}
+
+function saveCircuit() {
+  localStorage.setItem('dangote-academy-circuit', JSON.stringify(serialiseCircuit()));
+  showToast('Circuit diagram saved.');
+}
+
+function loadCircuit() {
+  const saved = localStorage.getItem('dangote-academy-circuit');
+  if (!saved) { showToast('No saved circuit diagram found.'); return; }
+  try { restoreCircuit(JSON.parse(saved)); showToast('Circuit diagram loaded.'); } catch { showToast('Saved circuit diagram is invalid.'); }
+}
+
+function exportCircuit() {
+  const blob = new Blob([JSON.stringify(serialiseCircuit(), null, 2)], { type: 'application/json' });
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(blob); link.download = 'dangote-circuit.json'; link.click(); URL.revokeObjectURL(link.href);
+}
+
+function importCircuit(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => { try { restoreCircuit(JSON.parse(reader.result)); showToast('Circuit diagram imported.'); } catch { showToast('The selected file is not a valid circuit diagram.'); } };
+  reader.readAsText(file);
+  event.target.value = '';
 }
 
 function checkCircuitLogic() {
   if (!isSimulating) return;
-  const components = $$('.circuit-component'); const hasSource = components.some(item => item.dataset.type === 'source-ac'); const lamps = components.filter(item => item.dataset.type === 'lamp');
-  const closed = components.filter(item => ['switch-1way', 'mcb'].includes(item.dataset.type)).every(item => item.dataset.state === 'on');
-  const powered = hasSource && closed && lamps.length > 0;
-  $('#sim-v').textContent = hasSource ? '230' : '0'; $('#sim-i').textContent = powered ? (lamps.length * .5).toFixed(1) : '0';
-  lamps.forEach(lamp => lamp.dataset.powered = powered ? 'true' : 'false');
+  const valid = validateCircuit();
+  const components = $$('.circuit-component'); const source = components.find(item => ['source-ac', 'battery'].includes(item.dataset.type)); const loads = components.filter(item => ['lamp', 'socket', 'motor'].includes(item.dataset.type));
+  const closed = components.filter(item => ['switch-1way', 'mcb', 'rcd'].includes(item.dataset.type)).every(item => item.dataset.state === 'on');
+  const powered = valid && closed;
+  const voltage = powered ? (source.dataset.type === 'battery' ? 12 : 230) : 0;
+  const current = powered ? loads.reduce((total, item) => total + ({ lamp: .5, socket: 5, motor: 6 }[item.dataset.type] || 0), 0) : 0;
+  $('#sim-v').textContent = voltage; $('#sim-i').textContent = current.toFixed(1); $('#sim-p').textContent = (voltage * current).toFixed(0);
+  loads.forEach(load => load.dataset.powered = powered ? 'true' : 'false');
 }
 
 function renderComponentCatalog() {
@@ -304,8 +439,8 @@ function answerTroubleshooting(event) {
 function toggleSimulation() {
   isSimulating = !isSimulating;
   const button = $('#simulate-circuit'); const indicator = $('#sim-indicator');
-  if (isSimulating) { button.innerHTML = '<i class="fa-solid fa-stop"></i> Stop simulation'; button.className = 'secondary-button'; $('#sim-status').textContent = 'Simulation running'; indicator.className = 'fa-solid fa-circle running'; checkCircuitLogic(); }
-  else { button.innerHTML = '<i class="fa-solid fa-play"></i> Run simulation'; button.className = 'success-button'; $('#sim-status').textContent = 'Simulation stopped'; indicator.className = 'fa-solid fa-circle stopped'; $('#sim-v').textContent = '0'; $('#sim-i').textContent = '0'; $$('.circuit-component').forEach(item => item.dataset.powered = 'false'); }
+  if (isSimulating) { button.innerHTML = '<i class="fa-solid fa-stop"></i> Stop simulation'; button.className = 'secondary-button'; $('#sim-status').textContent = 'Simulation running'; indicator.className = 'fa-solid fa-circle running'; simulationTimer = setInterval(() => { simulationSeconds += 1; $('#sim-energy').textContent = `${((Number($('#sim-p').textContent) * simulationSeconds) / 3600000).toFixed(2)} kWh`; }, 1000); checkCircuitLogic(); }
+  else { clearInterval(simulationTimer); button.innerHTML = '<i class="fa-solid fa-play"></i> Run simulation'; button.className = 'success-button'; $('#sim-status').textContent = 'Simulation stopped'; indicator.className = 'fa-solid fa-circle stopped'; $('#sim-v').textContent = '0'; $('#sim-i').textContent = '0'; $('#sim-p').textContent = '0'; $$('.circuit-component').forEach(item => item.dataset.powered = 'false'); }
 }
 
 function initialise() {
@@ -331,8 +466,13 @@ function initialise() {
   $$('[data-library-message]').forEach(button => button.addEventListener('click', () => showToast(button.dataset.libraryMessage)));
   $('#upload-video').addEventListener('click', () => showToast('Video upload is queued for the next module release.'));
   $$('.component-drag').forEach(item => item.addEventListener('dragstart', event => event.dataTransfer.setData('type', item.dataset.type)));
-  $('#circuit-canvas').addEventListener('dragover', event => event.preventDefault()); $('#circuit-canvas').addEventListener('drop', dropComponent); $('#clear-canvas').addEventListener('click', () => { $$('.circuit-component').forEach(item => item.remove()); isSimulating = true; toggleSimulation(); }); $('#simulate-circuit').addEventListener('click', toggleSimulation);
-  calculateSchedule();
+  $('#circuit-canvas').addEventListener('dragover', event => event.preventDefault()); $('#circuit-canvas').addEventListener('drop', dropComponent);
+  $('#clear-canvas').addEventListener('click', () => { $$('.circuit-component').forEach(item => item.remove()); circuitConnections = []; pendingConnection = null; renderCircuitWires(); updateCircuitSummary(); validateCircuit(); if (isSimulating) toggleSimulation(); });
+  $('#simulate-circuit').addEventListener('click', toggleSimulation);
+  $('#connect-mode').addEventListener('click', event => { connectMode = !connectMode; event.currentTarget.classList.toggle('active', connectMode); showToast(connectMode ? 'Connection mode enabled.' : 'Connection mode disabled.'); });
+  $('#validate-circuit').addEventListener('click', validateCircuit);
+  $('#save-circuit').addEventListener('click', saveCircuit); $('#load-circuit').addEventListener('click', loadCircuit); $('#export-circuit').addEventListener('click', exportCircuit); $('#import-circuit').addEventListener('click', () => $('#circuit-file').click()); $('#circuit-file').addEventListener('change', importCircuit);
+  calculateSchedule(); updateCircuitSummary(); validateCircuit();
 }
 
 document.addEventListener('DOMContentLoaded', initialise);

@@ -34,6 +34,10 @@ There is also a dependency-free browser test page at `tests/browser-test.html`.
 
 Runtime libraries are vendored under `assets/vendor/`. The application does not require a network connection after checkout.
 
+## Circuit builder
+
+The circuit builder supports AC mains and battery sources, MCB/RCD protection, switches, lamps, sockets, and motors. Enable **Connect components**, click two components to create a wire, and use **Validate circuit** to check source, protection, load, and connectivity requirements. Diagrams can be saved locally, loaded, exported as JSON, and imported from JSON. Simulation reports voltage, current, power, and estimated energy for the training circuit.
+
 ## Team workflow
 
 Use short branches and pull requests. Keep calculation logic in `core.js`, UI wiring in `script.js`, and update tests when engineering rules change. See [CONTRIBUTING.md](./CONTRIBUTING.md).
