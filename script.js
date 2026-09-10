@@ -24,6 +24,8 @@ let circuitRedo = [];
 let restoringCircuit = false;
 const phaseConductors = ['line', 'phase-a', 'phase-b', 'phase-c'];
 const conductorTypes = [...phaseConductors, 'neutral', 'earth'];
+const projectDatabaseName = 'dangote-academy-projects';
+const projectDatabaseVersion = 1;
 
 const componentCatalog = [
   { name: 'Miniature circuit breaker', category: 'protection', icon: 'fa-toggle-on', description: 'Protects final circuits from overload and short circuit conditions.', tags: ['Type C', '1-63 A'] },
@@ -181,6 +183,65 @@ function getSavedProjects() {
   }
 }
 
+function openProjectDatabase() {
+    return new Promise((resolve, reject) => {
+      if (!window.indexedDB) {
+        reject(new Error('IndexedDB is unavailable.'));
+        return;
+      }
+      const request = indexedDB.open(projectDatabaseName, projectDatabaseVersion);
+      request.onupgradeneeded = () => request.result.createObjectStore('projects', { keyPath: 'name' });
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error || new Error('Project database could not be opened.'));
+    });
+  }
+
+async function persistProjects(projects) {
+    try {
+      const database = await openProjectDatabase();
+      await new Promise((resolve, reject) => {
+        const transaction = database.transaction('projects', 'readwrite');
+        transaction.objectStore('projects').clear();
+        projects.forEach(project => transaction.objectStore('projects').put(project));
+        transaction.oncomplete = resolve;
+        transaction.onerror = () => reject(transaction.error || new Error('Project database write failed.'));
+      });
+      database.close();
+    } catch (error) {
+      console.warn('IndexedDB project persistence unavailable; localStorage remains active.', error);
+    }
+}
+
+async function restoreProjectsFromDatabase() {
+      try {
+        const database = await openProjectDatabase();
+        const projects = await new Promise((resolve, reject) => {
+          const request = database.transaction('projects', 'readonly').objectStore('projects').getAll();
+          request.onsuccess = () => resolve(request.result);
+          request.onerror = () => reject(request.error || new Error('Project database read failed.'));
+        });
+        database.close();
+        if (projects.length) {
+          localStorage.setItem('dangote-academy-projects', JSON.stringify(projects));
+          refreshProjectList();
+        } else if (getSavedProjects().length) {
+          persistProjects(getSavedProjects());
+        }
+      } catch (error) {
+        console.warn('IndexedDB project restore unavailable; localStorage remains active.', error);
+      }
+}
+
+function projectSnapshot(name) {
+    return {
+      name,
+      savedAt: new Date().toISOString(),
+      rows: getBOQRows(),
+      circuit: serialiseCircuit(),
+      revisions: []
+    };
+}
+
 function refreshProjectList() {
   const list = $('#project-list');
   list.innerHTML = '<option value="">Choose a project</option>';
@@ -199,8 +260,16 @@ function saveNamedProject() {
     return;
   }
   const projects = getSavedProjects().filter(project => project.name !== name);
-  projects.push({ name, savedAt: new Date().toISOString(), rows: getBOQRows() });
+  const previous = getSavedProjects().find(project => project.name === name);
+  const project = projectSnapshot(name);
+  project.revisions = [...(previous?.revisions || []), {
+    savedAt: previous?.savedAt || project.savedAt,
+    rows: previous?.rows || project.rows,
+    circuit: previous?.circuit || project.circuit
+  }].slice(-10);
+  projects.push(project);
   localStorage.setItem('dangote-academy-projects', JSON.stringify(projects));
+  persistProjects(projects);
   refreshProjectList();
   $('#project-list').value = name;
   showToast(`Project saved: ${name}`);
@@ -216,6 +285,7 @@ function loadNamedProject() {
   project.rows.forEach(item => addBoqRow(item.description, item.category, item.quantity, item.unit, item.price));
   restoringBOQ = false;
   updateBOQ();
+  if (project.circuit) restoreCircuit(project.circuit);
   showToast(`Project loaded: ${project.name}`);
 }
 
@@ -225,9 +295,45 @@ function deleteNamedProject() {
     showToast('Choose a saved project first.');
     return;
   }
-  localStorage.setItem('dangote-academy-projects', JSON.stringify(getSavedProjects().filter(project => project.name !== name)));
+  const projects = getSavedProjects().filter(project => project.name !== name);
+  localStorage.setItem('dangote-academy-projects', JSON.stringify(projects));
+  persistProjects(projects);
   refreshProjectList();
   showToast(`Project deleted: ${name}`);
+}
+
+function exportProject() {
+  const name = $('#project-name').value.trim() || 'Electrical Academy Project';
+  const blob = new Blob([JSON.stringify(projectSnapshot(name), null, 2)], { type: 'application/json' });
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(blob);
+  link.download = `${name.replace(/[^a-z0-9]+/gi, '-').toLowerCase() || 'project'}.json`;
+  link.click();
+  URL.revokeObjectURL(link.href);
+}
+
+function importProject(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const project = JSON.parse(reader.result);
+      if (!project || typeof project.name !== 'string' || !Array.isArray(project.rows) || !project.circuit) throw new Error('Invalid project.');
+      const projects = getSavedProjects().filter(item => item.name !== project.name);
+      projects.push(project);
+      localStorage.setItem('dangote-academy-projects', JSON.stringify(projects));
+      persistProjects(projects);
+      refreshProjectList();
+      $('#project-list').value = project.name;
+      loadNamedProject();
+      showToast(`Project imported: ${project.name}`);
+    } catch {
+      showToast('The selected project file is invalid.');
+    }
+  };
+  reader.readAsText(file);
+  event.target.value = '';
 }
 
 function restoreBOQ() {
@@ -545,6 +651,7 @@ function initialise() {
   restoreBOQ();
   updateBOQ();
   refreshProjectList();
+  restoreProjectsFromDatabase();
   renderComponentCatalog();
   renderTroubleshooting();
   $$('.nav-item').forEach(item => item.addEventListener('click', () => switchModule(item.dataset.module)));
@@ -555,7 +662,7 @@ function initialise() {
   $('#add-to-boq').addEventListener('click', () => { if (!lastCalculation) { showToast('Run a calculation first.'); return; } addBoqRow(`${lastCalculation.cable.size}mm² Single Core Copper Wire`, 'Cabling', 1, 'Roll', lastCalculation.cable.size * 15000); addBoqRow(`${lastCalculation.breaker} MCB`, 'Protection', 1, 'Pcs', 4500); switchModule('boq'); showToast('Calculation added to the BOQ.'); });
   $('#boq-body').addEventListener('input', updateBOQ); $('#boq-body').addEventListener('click', event => { if (event.target.closest('.delete-row')) { event.target.closest('tr').remove(); updateBOQ(); } });
   $('#add-custom-item').addEventListener('click', () => addBoqRow('Custom electrical item', 'General', 1, 'Pcs', 0)); $('#export-pdf').addEventListener('click', exportPdf);
-  $('#save-project').addEventListener('click', saveNamedProject); $('#project-list').addEventListener('change', loadNamedProject); $('#delete-project').addEventListener('click', deleteNamedProject);
+  $('#save-project').addEventListener('click', saveNamedProject); $('#project-list').addEventListener('change', loadNamedProject); $('#delete-project').addEventListener('click', deleteNamedProject); $('#export-project').addEventListener('click', exportProject); $('#import-project').addEventListener('click', () => $('#project-file').click()); $('#project-file').addEventListener('change', importProject);
   $('#component-search').addEventListener('input', renderComponentCatalog); $('#component-category').addEventListener('change', renderComponentCatalog);
   $('#calculate-schedule').addEventListener('click', calculateSchedule); $('#schedule-phase').addEventListener('change', calculateSchedule); $('#schedule-method').addEventListener('change', calculateSchedule); $('#schedule-rcd').addEventListener('change', calculateSchedule); $('#add-load-row').addEventListener('click', () => { addScheduleRow(); calculateSchedule(); }); $('#schedule-body').addEventListener('input', calculateSchedule); $('#schedule-body').addEventListener('click', event => { if (event.target.closest('.delete-schedule-row')) { event.target.closest('tr').remove(); calculateSchedule(); } });
   $('#troubleshooting-results').addEventListener('click', answerTroubleshooting);

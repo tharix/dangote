@@ -46,6 +46,10 @@ Cable sizing accepts cable length, ambient-temperature correction, and grouping 
 
 Three-phase load schedules assign each circuit to Phase A, B, or C and report phase-current spread, estimated neutral current, and phase-specific capacity warnings. A balance spread above 20% is flagged for review.
 
+## Offline project storage
+
+Named projects contain the BOQ and circuit diagram together, with up to ten previous snapshots retained as revisions. Projects are written to IndexedDB for larger offline-safe storage and mirrored to localStorage as a compatibility fallback. Use **Export project** and **Import project** to move a complete project between devices without a server.
+
 ## Team workflow
 
 Use short branches and pull requests. Keep calculation logic in `core.js`, UI wiring in `script.js`, and update tests when engineering rules change. The repository assigns default review ownership through [CODEOWNERS](./.github/CODEOWNERS) and checks GitHub Actions updates with Dependabot. See [CONTRIBUTING.md](./CONTRIBUTING.md).

@@ -8,8 +8,8 @@
 <body>
   <h1>Browser tests</h1>
   <ul id="results"></ul>
-  <script src="../core.js?v=20260910-1745"></script>
-  <iframe id="app" src="../index.html?v=20260910-1745" hidden title="application under test"></iframe>
+  <script src="../core.js?v=20260910-1800"></script>
+  <iframe id="app" src="../index.html?v=20260910-1800" hidden title="application under test"></iframe>
   <script>
     const results = document.querySelector('#results');
     const tests = [
@@ -137,6 +137,17 @@
           { ...connection('junction', 'lamp', 'line'), fromTerminal: 'branch-b' }
         ]);
         return !app.validateCircuit() && app.document.querySelector('#circuit-message').textContent.includes('duplicate');
+      }],
+      ['projects persist BOQ, circuit, and revisions', () => {
+        const app = testApp();
+        loadCircuit(app, ['source-ac', 'mcb', 'lamp'], [
+          connection('source', 'mcb', 'phase-c'), connection('mcb', 'lamp', 'phase-c')
+        ]);
+        app.document.querySelector('#project-name').value = 'Browser project';
+        app.saveNamedProject();
+        const saved = JSON.parse(app.localStorage.getItem('dangote-academy-projects'));
+        return saved[0].name === 'Browser project' && saved[0].circuit.version === 2 &&
+          saved[0].circuit.connections[0].conductor === 'phase-c' && Array.isArray(saved[0].revisions);
       }]
     ];
 
