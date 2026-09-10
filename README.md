@@ -46,7 +46,7 @@ Cable sizing accepts cable length, ambient-temperature correction, and grouping 
 
 ## Team workflow
 
-Use short branches and pull requests. Keep calculation logic in `core.js`, UI wiring in `script.js`, and update tests when engineering rules change. See [CONTRIBUTING.md](./CONTRIBUTING.md).
+Use short branches and pull requests. Keep calculation logic in `core.js`, UI wiring in `script.js`, and update tests when engineering rules change. The repository assigns default review ownership through [CODEOWNERS](./.github/CODEOWNERS) and checks GitHub Actions updates with Dependabot. See [CONTRIBUTING.md](./CONTRIBUTING.md).
 
 ## Deployment
 

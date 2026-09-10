@@ -1,0 +1,6 @@
+# Default reviewers for the academy application.
+* @tharix
+
+# Keep engineering rules reviewed by the project owner.
+core.js @tharix
+tests/ @tharix
