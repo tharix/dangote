@@ -13,8 +13,8 @@
   <script src="assets/vendor/jspdf/jspdf.umd.min.js" defer></script>
   <script src="assets/vendor/jspdf/jspdf.plugin.autotable.min.js" defer></script>
   <script src="supabase-config.js" defer></script>
-  <script src="core.js?v=20260910-1718" defer></script>
-  <script src="script.js?v=20260910-1718" defer></script>
+  <script src="core.js?v=20260910-1722" defer></script>
+  <script src="script.js?v=20260910-1722" defer></script>
 </head>
 <body>
   <a class="skip-link" href="#main-content">Skip to main content</a>
@@ -73,7 +73,7 @@
             <button class="secondary-button" id="export-circuit"><i class="fa-solid fa-download"></i> Export JSON</button>
             <button class="secondary-button" id="import-circuit"><i class="fa-solid fa-upload"></i> Import JSON</button>
             <label class="fault-selector">Fault mode<select id="circuit-fault"><option value="none">Normal operation</option><option value="open">Open circuit</option><option value="short">Short circuit</option><option value="earth-leakage">Earth leakage</option></select></label>
-            <label class="fault-selector">Conductor<select id="circuit-conductor"><option value="line">Line / phase</option><option value="neutral">Neutral</option><option value="earth">Protective earth</option></select></label>
+            <label class="fault-selector">Conductor<select id="circuit-conductor"><option value="line">Line / phase</option><option value="phase-a">Phase A</option><option value="phase-b">Phase B</option><option value="phase-c">Phase C</option><option value="neutral">Neutral</option><option value="earth">Protective earth</option></select></label>
             <input id="circuit-file" type="file" accept="application/json" hidden>
           </div>
           <div class="circuit-layout">

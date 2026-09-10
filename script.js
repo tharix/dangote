@@ -22,6 +22,8 @@ let circuitFault = 'none';
 let circuitHistory = [];
 let circuitRedo = [];
 let restoringCircuit = false;
+const phaseConductors = ['line', 'phase-a', 'phase-b', 'phase-c'];
+const conductorTypes = [...phaseConductors, 'neutral', 'earth'];
 
 const componentCatalog = [
   { name: 'Miniature circuit breaker', category: 'protection', icon: 'fa-toggle-on', description: 'Protects final circuits from overload and short circuit conditions.', tags: ['Type C', '1-63 A'] },
@@ -338,7 +340,7 @@ function renderCircuitWires() {
     const y1 = from.offsetTop + (fromTerminal ? fromTerminal.offsetTop + fromTerminal.offsetHeight / 2 : from.offsetHeight / 2);
     const x2 = to.offsetLeft + (toTerminal ? toTerminal.offsetLeft + toTerminal.offsetWidth / 2 : to.offsetWidth / 2);
     const y2 = to.offsetTop + (toTerminal ? toTerminal.offsetTop + toTerminal.offsetHeight / 2 : to.offsetHeight / 2);
-    const conductor = ['line', 'neutral', 'earth'].includes(connection.conductor) ? connection.conductor : 'line';
+    const conductor = conductorTypes.includes(connection.conductor) ? connection.conductor : 'line';
     return `<line class="circuit-wire conductor-${conductor}" data-connection="${index}" x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}"></line>`;
   }).join('');
 }
@@ -388,7 +390,7 @@ function validateCircuit() {
   while (queue.length) graph.get(queue.shift()).forEach(id => { if (!reachable.has(id)) { reachable.add(id); queue.push(id); } });
   const connectedLoad = loads.some(load => reachable.has(load.id));
   const lineGraph = new Map(components.map(item => [item.id, []]));
-  circuitConnections.filter(connection => connection.conductor === 'line').forEach(connection => {
+  circuitConnections.filter(connection => phaseConductors.includes(connection.conductor)).forEach(connection => {
     lineGraph.get(connection.from)?.push(connection.to);
     lineGraph.get(connection.to)?.push(connection.from);
   });
@@ -422,7 +424,7 @@ function serialiseCircuit() {
 
 function restoreCircuit(data) {
   if (!data || ![1, 2].includes(data.version) || !Array.isArray(data.components) || !Array.isArray(data.connections)) throw new Error('Unsupported circuit file.');
-  if (data.connections.some(connection => !['line', 'neutral', 'earth'].includes(connection.conductor || 'line'))) throw new Error('Unsupported conductor type.');
+  if (data.connections.some(connection => !conductorTypes.includes(connection.conductor || 'line'))) throw new Error('Unsupported conductor type.');
   restoringCircuit = true;
   $('#circuit-canvas').querySelectorAll('.circuit-component').forEach(item => item.remove());
   circuitConnections = [];

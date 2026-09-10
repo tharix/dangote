@@ -8,7 +8,7 @@
 <body>
   <h1>Browser tests</h1>
   <ul id="results"></ul>
-  <script src="../core.js?v=20260910-1632"></script>
+  <script src="../core.js?v=20260910-1722"></script>
   <script>
     const results = document.querySelector('#results');
     const tests = [
@@ -17,7 +17,8 @@
       ['schedule demand calculated', () => DangoteAcademyCore.calculateScheduleSizing({ phase: 1, method: 'clipped', rcd: 'recommended', rows: [{ load: 1.2, quantity: 1, pf: .95, diversity: .8 }] }).demand === .96],
       ['correction factors change cable selection', () => DangoteAcademyCore.calculateLoadSizing({ phase: 1, loadType: 'kw', loadValue: 10, pf: .85, diversity: .8, installMethod: 'conduit', cableLength: 75, ambientFactor: .94, groupingFactor: .8 }).cable.size === 16],
       ['invalid cable length rejected', () => !DangoteAcademyCore.calculateLoadSizing({ phase: 1, loadType: 'kw', loadValue: 10, pf: .85, diversity: .8, installMethod: 'conduit', cableLength: 0 }).valid],
-      ['three-phase voltage applied', () => DangoteAcademyCore.calculateLoadSizing({ phase: 3, loadType: 'kw', loadValue: 15, pf: .9, diversity: 1, installMethod: 'tray' }).voltage === 400]
+      ['three-phase voltage applied', () => DangoteAcademyCore.calculateLoadSizing({ phase: 3, loadType: 'kw', loadValue: 15, pf: .9, diversity: 1, installMethod: 'tray' }).voltage === 400],
+      ['three-phase current calculated', () => DangoteAcademyCore.calculateLoadSizing({ phase: 3, loadType: 'kw', loadValue: 15, pf: .9, diversity: 1, installMethod: 'tray' }).current === 24.06]
     ];
     tests.forEach(([name, run]) => {
       const item = document.createElement('li');
