@@ -268,10 +268,12 @@ function createComponent(type, x, y) {
   const [label, symbol] = labels[type] || [type, '?'];
   const element = document.createElement('div');
   element.className = 'circuit-component'; element.id = id; element.dataset.type = type; element.dataset.state = ['mcb', 'rcd'].includes(type) ? 'on' : 'off'; element.draggable = true; element.style.left = `${Math.max(0, x)}px`; element.style.top = `${Math.max(0, y)}px`;
-  element.innerHTML = `<div class="component-symbol">${symbol}</div><span class="component-label">${label}</span><button class="remove-component" aria-label="Remove component"><i class="fa-solid fa-xmark"></i></button>`;
+  element.innerHTML = `<button class="circuit-terminal terminal-in" data-terminal="in" aria-label="${label} input terminal"></button><div class="component-symbol">${symbol}</div><span class="component-label">${label}</span><button class="circuit-terminal terminal-out" data-terminal="out" aria-label="${label} output terminal"></button><button class="remove-component" aria-label="Remove component"><i class="fa-solid fa-xmark"></i></button>`;
   element.addEventListener('dragstart', event => { const rect = element.getBoundingClientRect(); event.dataTransfer.setData('existing-id', id); event.dataTransfer.setData('offset-x', event.clientX - rect.left); event.dataTransfer.setData('offset-y', event.clientY - rect.top); });
   element.addEventListener('click', event => {
     if (event.target.closest('.remove-component')) { removeComponent(id); return; }
+    const terminal = event.target.closest('.circuit-terminal');
+    if (terminal && connectMode) { selectConnectionEndpoint(id, terminal.dataset.terminal); return; }
     if (connectMode) { selectConnectionEndpoint(id); return; }
     if (['switch-1way', 'mcb', 'rcd'].includes(type)) { element.dataset.state = element.dataset.state === 'on' ? 'off' : 'on'; checkCircuitLogic(); }
   });
@@ -301,16 +303,17 @@ function removeComponent(id) {
   checkCircuitLogic();
 }
 
-function selectConnectionEndpoint(id) {
+function selectConnectionEndpoint(id, terminal = 'out') {
   if (!pendingConnection) {
-    pendingConnection = id;
+    pendingConnection = { id, terminal };
     $(`#${id}`).classList.add('connection-selected');
-    showToast('Select a second component to create a wire.');
+    showToast('Select a destination terminal to create a wire.');
     return;
   }
-  if (pendingConnection === id) return;
-  const duplicate = circuitConnections.some(connection => (connection.from === pendingConnection && connection.to === id) || (connection.from === id && connection.to === pendingConnection));
-  if (!duplicate) { pushCircuitHistory(); circuitConnections.push({ from: pendingConnection, to: id }); }
+  if (pendingConnection.id === id) return;
+  const connection = { from: pendingConnection.id, fromTerminal: pendingConnection.terminal, to: id, toTerminal: terminal };
+  const duplicate = circuitConnections.some(item => item.from === connection.from && item.fromTerminal === connection.fromTerminal && item.to === connection.to && item.toTerminal === connection.toTerminal);
+  if (!duplicate) { pushCircuitHistory(); circuitConnections.push(connection); }
   $$('.connection-selected').forEach(item => item.classList.remove('connection-selected'));
   pendingConnection = null;
   renderCircuitWires();
@@ -328,10 +331,12 @@ function renderCircuitWires() {
     const from = $(`#${connection.from}`);
     const to = $(`#${connection.to}`);
     if (!from || !to) return '';
-    const x1 = from.offsetLeft + from.offsetWidth / 2;
-    const y1 = from.offsetTop + from.offsetHeight / 2;
-    const x2 = to.offsetLeft + to.offsetWidth / 2;
-    const y2 = to.offsetTop + to.offsetHeight / 2;
+    const fromTerminal = $(`#${connection.from} .circuit-terminal[data-terminal="${connection.fromTerminal || 'out'}"]`);
+    const toTerminal = $(`#${connection.to} .circuit-terminal[data-terminal="${connection.toTerminal || 'in'}"]`);
+    const x1 = from.offsetLeft + (fromTerminal ? fromTerminal.offsetLeft + fromTerminal.offsetWidth / 2 : from.offsetWidth / 2);
+    const y1 = from.offsetTop + (fromTerminal ? fromTerminal.offsetTop + fromTerminal.offsetHeight / 2 : from.offsetHeight / 2);
+    const x2 = to.offsetLeft + (toTerminal ? toTerminal.offsetLeft + toTerminal.offsetWidth / 2 : to.offsetWidth / 2);
+    const y2 = to.offsetTop + (toTerminal ? toTerminal.offsetTop + toTerminal.offsetHeight / 2 : to.offsetHeight / 2);
     return `<line class="circuit-wire" data-connection="${index}" x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}"></line>`;
   }).join('');
 }
@@ -381,8 +386,10 @@ function validateCircuit() {
   const queue = source ? [source.id] : [];
   while (queue.length) graph.get(queue.shift()).forEach(id => { if (!reachable.has(id)) { reachable.add(id); queue.push(id); } });
   const connectedLoad = loads.some(load => reachable.has(load.id));
-  const complete = Boolean(source && loads.length && hasProtection && connectedLoad && circuitConnections.length >= components.length - 1);
-  const message = !source ? 'Add a source.' : !loads.length ? 'Add at least one load.' : !hasProtection ? 'Add an MCB or RCD.' : !connectedLoad ? 'Connect the source path to a load.' : complete ? 'Topology is complete for this training exercise.' : 'Connect every component into one circuit path.';
+  const terminalConnections = circuitConnections.filter(connection => connection.fromTerminal && connection.toTerminal);
+  const terminalsComplete = terminalConnections.length === circuitConnections.length;
+  const complete = Boolean(source && loads.length && hasProtection && connectedLoad && terminalsComplete && circuitConnections.length >= components.length - 1);
+  const message = !source ? 'Add a source.' : !loads.length ? 'Add at least one load.' : !hasProtection ? 'Add an MCB or RCD.' : !connectedLoad ? 'Connect the source path to a load.' : !terminalsComplete ? 'Reconnect wires using the visible input and output terminals.' : complete ? 'Topology is complete for this training exercise.' : 'Connect every component into one circuit path.';
   $('#circuit-validation').textContent = complete ? 'Circuit valid' : 'Review required';
   $('#circuit-validation').className = complete ? 'validation-good' : 'validation-warning';
   $('#circuit-message').textContent = message;
@@ -391,14 +398,14 @@ function validateCircuit() {
 
 function serialiseCircuit() {
   return {
-    version: 1,
+    version: 2,
     components: $$('.circuit-component').map(item => ({ id: item.id, type: item.dataset.type, state: item.dataset.state, left: parseInt(item.style.left, 10), top: parseInt(item.style.top, 10) })),
     connections: circuitConnections.map(connection => ({ ...connection }))
   };
 }
 
 function restoreCircuit(data) {
-  if (!data || data.version !== 1 || !Array.isArray(data.components) || !Array.isArray(data.connections)) throw new Error('Unsupported circuit file.');
+  if (!data || ![1, 2].includes(data.version) || !Array.isArray(data.components) || !Array.isArray(data.connections)) throw new Error('Unsupported circuit file.');
   restoringCircuit = true;
   $('#circuit-canvas').querySelectorAll('.circuit-component').forEach(item => item.remove());
   circuitConnections = [];
@@ -407,7 +414,7 @@ function restoreCircuit(data) {
   data.components.forEach((item, index) => { const element = $(`#${ids[index]}`); if (element) element.dataset.state = item.state || element.dataset.state; });
   data.connections.forEach(connection => {
     if (idMap.has(connection.from) && idMap.has(connection.to)) {
-      circuitConnections.push({ from: idMap.get(connection.from), to: idMap.get(connection.to) });
+      circuitConnections.push({ from: idMap.get(connection.from), fromTerminal: connection.fromTerminal || 'out', to: idMap.get(connection.to), toTerminal: connection.toTerminal || 'in' });
     }
   });
   renderCircuitWires();
