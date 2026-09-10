@@ -312,8 +312,8 @@ function selectConnectionEndpoint(id, terminal = 'out') {
     return;
   }
   if (pendingConnection.id === id) return;
-  const connection = { from: pendingConnection.id, fromTerminal: pendingConnection.terminal, to: id, toTerminal: terminal };
-  const duplicate = circuitConnections.some(item => item.from === connection.from && item.fromTerminal === connection.fromTerminal && item.to === connection.to && item.toTerminal === connection.toTerminal);
+  const connection = { from: pendingConnection.id, fromTerminal: pendingConnection.terminal, to: id, toTerminal: terminal, conductor: $('#circuit-conductor')?.value || 'line' };
+  const duplicate = circuitConnections.some(item => item.from === connection.from && item.fromTerminal === connection.fromTerminal && item.to === connection.to && item.toTerminal === connection.toTerminal && item.conductor === connection.conductor);
   if (!duplicate) { pushCircuitHistory(); circuitConnections.push(connection); }
   $$('.connection-selected').forEach(item => item.classList.remove('connection-selected'));
   pendingConnection = null;
@@ -338,7 +338,8 @@ function renderCircuitWires() {
     const y1 = from.offsetTop + (fromTerminal ? fromTerminal.offsetTop + fromTerminal.offsetHeight / 2 : from.offsetHeight / 2);
     const x2 = to.offsetLeft + (toTerminal ? toTerminal.offsetLeft + toTerminal.offsetWidth / 2 : to.offsetWidth / 2);
     const y2 = to.offsetTop + (toTerminal ? toTerminal.offsetTop + toTerminal.offsetHeight / 2 : to.offsetHeight / 2);
-    return `<line class="circuit-wire" data-connection="${index}" x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}"></line>`;
+    const conductor = ['line', 'neutral', 'earth'].includes(connection.conductor) ? connection.conductor : 'line';
+    return `<line class="circuit-wire conductor-${conductor}" data-connection="${index}" x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}"></line>`;
   }).join('');
 }
 
@@ -417,7 +418,7 @@ function restoreCircuit(data) {
   data.components.forEach((item, index) => { const element = $(`#${ids[index]}`); if (element) element.dataset.state = item.state || element.dataset.state; });
   data.connections.forEach(connection => {
     if (idMap.has(connection.from) && idMap.has(connection.to)) {
-      circuitConnections.push({ from: idMap.get(connection.from), fromTerminal: connection.fromTerminal || 'out', to: idMap.get(connection.to), toTerminal: connection.toTerminal || 'in' });
+      circuitConnections.push({ from: idMap.get(connection.from), fromTerminal: connection.fromTerminal || 'out', to: idMap.get(connection.to), toTerminal: connection.toTerminal || 'in', conductor: connection.conductor || 'line' });
     }
   });
   renderCircuitWires();
