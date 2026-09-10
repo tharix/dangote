@@ -62,3 +62,41 @@ test('calculates diversified schedule demand', () => {
   assert.equal(result.demand, 2.76);
   assert.equal(result.rcdRecommended, true);
 });
+
+test('estimates three-phase balance and neutral current', () => {
+  const result = calculateScheduleSizing({
+    phase: 3, method: 'clipped', rcd: 'recommended',
+    rows: [
+      { load: 3, quantity: 1, pf: 1, diversity: 1, phase: 'phase-a' },
+      { load: 2, quantity: 1, pf: 1, diversity: 1, phase: 'phase-b' },
+      { load: 1, quantity: 1, pf: 1, diversity: 1, phase: 'phase-c' }
+    ]
+  });
+  assert.equal(result.valid, true);
+  assert.equal(result.phaseLoads['phase-a'], 3);
+  assert.equal(result.phaseLoads['phase-c'], 1);
+  assert.equal(result.neutralCurrent > 0, true);
+  assert.equal(result.balancePercent > 0, true);
+});
+
+test('reports near-zero neutral current for balanced phases', () => {
+  const result = calculateScheduleSizing({
+    phase: 3, method: 'clipped', rcd: 'recommended',
+    rows: [
+      { load: 3, quantity: 1, pf: 1, diversity: 1, phase: 'phase-a' },
+      { load: 3, quantity: 1, pf: 1, diversity: 1, phase: 'phase-b' },
+      { load: 3, quantity: 1, pf: 1, diversity: 1, phase: 'phase-c' }
+    ]
+  });
+  assert.equal(result.valid, true);
+  assert.equal(result.balancePercent, 0);
+  assert.equal(result.neutralCurrent, 0);
+});
+
+test('rejects unsupported phase assignment', () => {
+  const result = calculateScheduleSizing({
+    phase: 3, method: 'clipped', rcd: 'recommended',
+    rows: [{ load: 1, quantity: 1, pf: .9, diversity: 1, phase: 'neutral' }]
+  });
+  assert.equal(result.valid, false);
+});

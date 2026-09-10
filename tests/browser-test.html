@@ -8,7 +8,8 @@
 <body>
   <h1>Browser tests</h1>
   <ul id="results"></ul>
-  <script src="../core.js?v=20260910-1722"></script>
+  <script src="../core.js?v=20260910-1745"></script>
+  <iframe id="app" src="../index.html?v=20260910-1745" hidden title="application under test"></iframe>
   <script>
     const results = document.querySelector('#results');
     const tests = [
@@ -18,9 +19,144 @@
       ['correction factors change cable selection', () => DangoteAcademyCore.calculateLoadSizing({ phase: 1, loadType: 'kw', loadValue: 10, pf: .85, diversity: .8, installMethod: 'conduit', cableLength: 75, ambientFactor: .94, groupingFactor: .8 }).cable.size === 16],
       ['invalid cable length rejected', () => !DangoteAcademyCore.calculateLoadSizing({ phase: 1, loadType: 'kw', loadValue: 10, pf: .85, diversity: .8, installMethod: 'conduit', cableLength: 0 }).valid],
       ['three-phase voltage applied', () => DangoteAcademyCore.calculateLoadSizing({ phase: 3, loadType: 'kw', loadValue: 15, pf: .9, diversity: 1, installMethod: 'tray' }).voltage === 400],
-      ['three-phase current calculated', () => DangoteAcademyCore.calculateLoadSizing({ phase: 3, loadType: 'kw', loadValue: 15, pf: .9, diversity: 1, installMethod: 'tray' }).current === 24.06]
+      ['three-phase current calculated', () => DangoteAcademyCore.calculateLoadSizing({ phase: 3, loadType: 'kw', loadValue: 15, pf: .9, diversity: 1, installMethod: 'tray' }).current === 24.06],
+      ['linear circuit validates', () => {
+        const app = testApp();
+        loadCircuit(app, ['source-ac', 'mcb', 'lamp'], [
+          connection('source', 'mcb', 'line'), connection('mcb', 'lamp', 'line')
+        ]);
+        return app.validateCircuit() && app.document.querySelector('#circuit-message').textContent.includes('complete');
+      }],
+      ['junction branching validates both branches', () => {
+        const app = testApp();
+        loadCircuit(app, ['source-ac', 'mcb', 'junction', 'lamp', 'socket'], [
+          connection('source', 'mcb', 'line'), connection('mcb', 'junction', 'line'),
+          { ...connection('junction', 'lamp', 'phase-a'), fromTerminal: 'branch-a' }, { ...connection('junction', 'socket', 'phase-a'), fromTerminal: 'branch-b' }
+        ]);
+        return app.validateCircuit();
+      }],
+      ['neutral-only circuit is rejected', () => {
+        const app = testApp();
+        loadCircuit(app, ['source-ac', 'mcb', 'lamp'], [
+          connection('source', 'mcb', 'neutral'), connection('mcb', 'lamp', 'neutral')
+        ]);
+        return !app.validateCircuit() && app.document.querySelector('#circuit-message').textContent.includes('line / phase');
+      }],
+      ['earth leakage requires RCD and earth path', () => {
+        const app = testApp();
+        const fault = app.document.querySelector('#circuit-fault');
+        loadCircuit(app, ['source-ac', 'mcb', 'lamp'], [
+          connection('source', 'mcb', 'line'), connection('mcb', 'lamp', 'line')
+        ]);
+        fault.value = 'earth-leakage';
+        fault.dispatchEvent(new app.Event('change'));
+        const rejected = !app.validateCircuit();
+        loadCircuit(app, ['source-ac', 'rcd', 'lamp'], [
+          connection('source', 'rcd', 'line'), connection('rcd', 'lamp', 'line'),
+          connection('source', 'lamp', 'earth')
+        ]);
+        fault.value = 'earth-leakage';
+        fault.dispatchEvent(new app.Event('change'));
+        return rejected && app.validateCircuit();
+      }],
+      ['fault modes update simulation safely', () => {
+        const app = testApp();
+        loadCircuit(app, ['source-ac', 'mcb', 'lamp'], [
+          connection('source', 'mcb', 'line'), connection('mcb', 'lamp', 'line')
+        ]);
+        const fault = app.document.querySelector('#circuit-fault');
+        if (app.document.querySelector('#simulate-circuit').textContent.includes('Run simulation')) app.toggleSimulation();
+        fault.value = 'open'; fault.dispatchEvent(new app.Event('change'));
+        const open = app.document.querySelector('#sim-status').textContent.includes('open circuit');
+        fault.value = 'short'; fault.dispatchEvent(new app.Event('change'));
+        const short = app.document.querySelector('#sim-i').textContent === '80.0';
+        fault.value = 'none'; fault.dispatchEvent(new app.Event('change'));
+        const normal = app.document.querySelector('#sim-v').textContent === '230';
+        app.toggleSimulation();
+        return open && short && normal;
+      }],
+      ['undo and redo restore circuit changes', () => {
+        const app = testApp();
+        loadCircuit(app, []);
+        const before = app.document.querySelectorAll('.circuit-component').length;
+        app.createComponent('lamp', 20, 20);
+        const added = app.document.querySelectorAll('.circuit-component').length === before + 1;
+        app.undoCircuit();
+        const undone = app.document.querySelectorAll('.circuit-component').length === before;
+        app.redoCircuit();
+        return added && undone && app.document.querySelectorAll('.circuit-component').length === before + 1;
+      }],
+      ['save and load preserve circuit JSON', () => {
+        const app = testApp();
+        loadCircuit(app, ['source-ac', 'mcb', 'lamp'], [
+          connection('source', 'mcb', 'phase-b'), connection('mcb', 'lamp', 'phase-b')
+        ]);
+        app.saveCircuit();
+        const saved = JSON.parse(app.localStorage.getItem('dangote-academy-circuit'));
+        loadCircuit(app, []);
+        app.loadCircuit();
+        const restored = app.serialiseCircuit();
+        return saved.version === 2 && restored.components.length === 3 && restored.connections[0].conductor === 'phase-b';
+      }],
+      ['version one JSON migrates with default terminals and line conductor', () => {
+        const app = testApp();
+        loadCircuit(app, ['source-ac', 'lamp'], [connection('source', 'lamp', undefined, false)]);
+        const legacy = { version: 1, components: [
+          { id: 'source', type: 'source-ac', left: 0, top: 0 },
+          { id: 'lamp', type: 'lamp', left: 100, top: 0 }
+        ], connections: [{ from: 'source', to: 'lamp' }] };
+        app.restoreCircuit(legacy);
+        const migrated = app.serialiseCircuit();
+        return migrated.version === 2 && migrated.connections[0].conductor === 'line' &&
+          migrated.connections[0].fromTerminal === 'out' && migrated.connections[0].toTerminal === 'in';
+      }],
+      ['conductor types persist through restore', () => {
+        const app = testApp();
+        loadCircuit(app, ['source-ac', 'lamp'], [connection('source', 'lamp', 'earth')]);
+        const before = app.serialiseCircuit().connections[0].conductor;
+        const json = app.serialiseCircuit();
+        app.restoreCircuit(json);
+        return before === 'earth' && app.serialiseCircuit().connections[0].conductor === 'earth';
+      }],
+      ['invalid conductor import is rejected without mutation', () => {
+        const app = testApp();
+        loadCircuit(app, ['source-ac', 'lamp'], [connection('source', 'lamp', 'line')]);
+        const before = app.serialiseCircuit().components.length;
+        const invalid = app.serialiseCircuit();
+        invalid.connections[0].conductor = 'telepathy';
+        let rejected = false;
+        try { app.restoreCircuit(invalid); } catch (error) { rejected = error.message.includes('conductor'); }
+        return rejected && app.serialiseCircuit().components.length === before;
+      }],
+      ['duplicate destination terminals are rejected', () => {
+        const app = testApp();
+        loadCircuit(app, ['source-ac', 'mcb', 'junction', 'lamp', 'socket'], [
+          connection('source', 'mcb', 'line'),
+          connection('mcb', 'junction', 'line'),
+          { ...connection('junction', 'lamp', 'line'), fromTerminal: 'branch-a' },
+          { ...connection('junction', 'lamp', 'line'), fromTerminal: 'branch-b' }
+        ]);
+        return !app.validateCircuit() && app.document.querySelector('#circuit-message').textContent.includes('duplicate');
+      }]
     ];
-    tests.forEach(([name, run]) => {
+
+    function testApp() {
+      const frame = document.querySelector('#app').contentWindow;
+      if (!frame || !frame.document.querySelector('#circuit-canvas')) throw new Error('application is not ready');
+      return frame;
+    }
+    function connection(from, to, conductor = 'line', terminals = true) {
+      return { from, to, conductor, ...(terminals ? { fromTerminal: 'out', toTerminal: 'in' } : {}) };
+    }
+    function loadCircuit(app, types, connections = []) {
+      app.restoreCircuit({
+        version: 2,
+        components: types.map((type, index) => ({ id: type === 'source-ac' ? 'source' : `${type}-${index}`, type, left: index * 120, top: 0 })),
+        connections: connections.map(item => ({ ...item, from: item.from === 'source' ? 'source' : `${item.from}-${types.indexOf(item.from)}`, to: item.to === 'source' ? 'source' : `${item.to}-${types.indexOf(item.to)}` }))
+      });
+    }
+    function runTests() {
+      tests.forEach(([name, run]) => {
       const item = document.createElement('li');
       try {
         if (!run()) throw new Error('assertion failed');
@@ -31,7 +167,9 @@
         item.textContent = `FAIL: ${name} (${error.message})`;
       }
       results.appendChild(item);
-    });
+      });
+    }
+    document.querySelector('#app').addEventListener('load', runTests, { once: true });
   </script>
 </body>
 </html>

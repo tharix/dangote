@@ -38,11 +38,13 @@ Runtime libraries are vendored under `assets/vendor/`. The application does not 
 
 The circuit builder supports AC mains and battery sources, MCB/RCD protection, switches, junctions, lamps, sockets, and motors. Enable **Connect components**, choose a conductor (line, phases A/B/C, neutral, or protective earth), then select the visible output and input terminals to create a wire. Junctions expose an input and two branch outputs for simple parallel circuits. Validation requires a phase path to loads; earth-leakage exercises also require an RCD and protective-earth path. Use **Validate circuit** to check source, protection, load, terminal wiring, conductor, and connectivity requirements. Diagrams can be saved locally, loaded, exported as JSON, and imported from JSON. Simulation reports voltage, current, power, and estimated energy for the training circuit. Existing version-1 diagrams remain importable and are upgraded when restored.
 
-Undo/redo is available for diagram edits, and fault modes simulate open circuits, short circuits, and earth leakage for classroom exercises.
+Undo/redo is available for diagram edits, and fault modes simulate open circuits, short circuits, and earth leakage for classroom exercises. Junction branches use separate branch A and branch B terminals, and validation rejects invalid or duplicated destination terminals.
 
 ## Engineering calculator
 
 Cable sizing accepts cable length, ambient-temperature correction, and grouping correction factors. Results show adjusted derating and voltage-drop percentage. These remain training estimates and must be checked against the applicable installation standard before field use.
+
+Three-phase load schedules assign each circuit to Phase A, B, or C and report phase-current spread, estimated neutral current, and phase-specific capacity warnings. A balance spread above 20% is flagged for review.
 
 ## Team workflow
 

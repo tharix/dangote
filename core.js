@@ -53,13 +53,21 @@
     let connected = 0;
     let demand = 0;
     let apparentDemand = 0;
+    const phaseLoads = { 'phase-a': 0, 'phase-b': 0, 'phase-c': 0 };
+    const phaseApparentLoads = { 'phase-a': 0, 'phase-b': 0, 'phase-c': 0 };
     for (const row of rows) {
-      if (row.load < 0 || row.quantity < 1 || row.pf <= 0 || row.pf > 1 || row.diversity <= 0 || row.diversity > 1) {
+      const assignedPhase = row.phase || 'phase-a';
+      if (row.load < 0 || row.quantity < 1 || row.pf <= 0 || row.pf > 1 || row.diversity <= 0 || row.diversity > 1 ||
+        (phase === 3 && !Object.hasOwn(phaseLoads, assignedPhase))) {
         return { valid: false, error: 'Check load schedule values and power factors.' };
       }
       connected += row.load * row.quantity;
-      demand += row.load * row.quantity * row.diversity;
-      apparentDemand += row.load * row.quantity * row.diversity / Math.max(row.pf, .01);
+      const rowDemand = row.load * row.quantity * row.diversity;
+      const rowApparentDemand = rowDemand / Math.max(row.pf, .01);
+      demand += rowDemand;
+      apparentDemand += rowApparentDemand;
+      phaseLoads[assignedPhase] += rowDemand;
+      phaseApparentLoads[assignedPhase] += rowApparentDemand;
     }
     if (!Number.isFinite(connected)) return { valid: false, error: 'Check load schedule values and power factors.' };
     const voltage = phase === 3 ? 400 : 230;
@@ -67,6 +75,21 @@
     const derating = deratingFactors[method];
     const cable = cableOptions.find(option => option.capacity * derating >= current) || cableOptions.at(-1);
     const coordinationOk = cable.breaker >= current && cable.breaker <= cable.capacity * derating;
+    const phaseCurrents = Object.fromEntries(Object.entries(phaseApparentLoads).map(([name, load]) => [name, load * 1000 / 230]));
+    const activePhaseCurrents = phase === 3 ? Object.values(phaseCurrents) : [current];
+    const highestPhaseCurrent = Math.max(...activePhaseCurrents);
+    const lowestPhaseCurrent = Math.min(...activePhaseCurrents);
+    const averagePhaseCurrent = activePhaseCurrents.reduce((sum, value) => sum + value, 0) / activePhaseCurrents.length;
+    const balancePercent = averagePhaseCurrent ? (highestPhaseCurrent - lowestPhaseCurrent) / averagePhaseCurrent * 100 : 0;
+    const neutralCurrent = phase === 3
+      ? Math.sqrt(
+        Math.pow(phaseCurrents['phase-a'] - .5 * phaseCurrents['phase-b'] - .5 * phaseCurrents['phase-c'], 2) +
+        Math.pow(Math.sqrt(3) / 2 * (phaseCurrents['phase-b'] - phaseCurrents['phase-c']), 2)
+      )
+      : 0;
+    const phaseWarnings = phase === 3
+      ? Object.entries(phaseCurrents).filter(([, value]) => value > cable.capacity * derating).map(([name]) => `${name} exceeds adjusted cable capacity`)
+      : [];
     return {
       valid: true,
       connected,
@@ -76,7 +99,12 @@
       deratedCapacity: cable.capacity * derating,
       coordinationOk,
       rcdRecommended: rcd === 'recommended',
-      needsReview: current > 125 || !coordinationOk || cable === cableOptions.at(-1)
+      needsReview: current > 125 || !coordinationOk || cable === cableOptions.at(-1) || balancePercent > 20 || phaseWarnings.length > 0,
+      phaseLoads,
+      phaseCurrents,
+      neutralCurrent: Math.round(neutralCurrent * 100) / 100,
+      balancePercent: Math.round(balancePercent * 100) / 100,
+      phaseWarnings
     };
   }
 

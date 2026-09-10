@@ -65,14 +65,14 @@ function insertLoadScheduleModule() {
   const section = document.createElement('section');
   section.className = 'module';
   section.id = 'module-load-schedule';
-  section.innerHTML = `<div class="section-heading"><div><p class="eyebrow accent">Engineering tools</p><h2>Load schedule & design checks</h2><p class="muted">Build a training load schedule and review diversified demand before cable selection.</p></div><span class="demo-note"><i class="fa-solid fa-circle-info"></i> Training estimate</span></div><div class="schedule-toolbar"><label>System phase<select id="schedule-phase"><option value="1">Single phase · 230 V</option><option value="3">Three phase · 400 V</option></select></label><label>Installation method<select id="schedule-method"><option value="clipped">Clipped direct</option><option value="conduit">Enclosed in conduit</option><option value="tray">Cable tray</option><option value="ground">Direct in ground</option></select></label><label>RCD protection<select id="schedule-rcd"><option value="recommended">Recommended</option><option value="not-required">Not required for this exercise</option></select></label><button class="secondary-button" id="add-load-row"><i class="fa-solid fa-plus"></i> Add circuit</button><button class="primary-button" id="calculate-schedule"><i class="fa-solid fa-calculator"></i> Recalculate schedule</button></div><article class="panel table-panel"><div class="table-scroll"><table class="schedule-table"><thead><tr><th>Circuit</th><th>Load (kW)</th><th>Qty</th><th>Power factor</th><th>Diversity</th><th>Action</th></tr></thead><tbody id="schedule-body"></tbody></table></div></article><div class="schedule-results"><article class="stat-card blue"><span>Connected load</span><strong id="schedule-connected">0.00 kW</strong><small>Total installed load</small></article><article class="stat-card yellow"><span>Diversified demand</span><strong id="schedule-demand">0.00 kW</strong><small>After diversity factors</small></article><article class="stat-card green"><span>Estimated design current</span><strong id="schedule-current">0.00 A</strong><small>Based on selected phase</small></article><article class="protection-card" id="protection-result"><div><span>Protection review</span><strong id="schedule-protection">--</strong></div><small id="schedule-capacity">Cable capacity: --</small><small id="schedule-rcd-result">RCD: --</small></article><article class="schedule-status" id="schedule-status"><i class="fa-solid fa-circle-check"></i><div><strong>Ready for review</strong><p>Check protective devices and installation conditions against the applicable standard.</p></div></article></div>`;
+  section.innerHTML = `<div class="section-heading"><div><p class="eyebrow accent">Engineering tools</p><h2>Load schedule & design checks</h2><p class="muted">Build a training load schedule and review diversified demand before cable selection.</p></div><span class="demo-note"><i class="fa-solid fa-circle-info"></i> Training estimate</span></div><div class="schedule-toolbar"><label>System phase<select id="schedule-phase"><option value="1">Single phase · 230 V</option><option value="3">Three phase · 400 V</option></select></label><label>Installation method<select id="schedule-method"><option value="clipped">Clipped direct</option><option value="conduit">Enclosed in conduit</option><option value="tray">Cable tray</option><option value="ground">Direct in ground</option></select></label><label>RCD protection<select id="schedule-rcd"><option value="recommended">Recommended</option><option value="not-required">Not required for this exercise</option></select></label><button class="secondary-button" id="add-load-row"><i class="fa-solid fa-plus"></i> Add circuit</button><button class="primary-button" id="calculate-schedule"><i class="fa-solid fa-calculator"></i> Recalculate schedule</button></div><article class="panel table-panel"><div class="table-scroll"><table class="schedule-table"><thead><tr><th>Circuit</th><th>Load (kW)</th><th>Qty</th><th>Power factor</th><th>Diversity</th><th>Phase</th><th>Action</th></tr></thead><tbody id="schedule-body"></tbody></table></div></article><div class="schedule-results"><article class="stat-card blue"><span>Connected load</span><strong id="schedule-connected">0.00 kW</strong><small>Total installed load</small></article><article class="stat-card yellow"><span>Diversified demand</span><strong id="schedule-demand">0.00 kW</strong><small>After diversity factors</small></article><article class="stat-card green"><span>Estimated design current</span><strong id="schedule-current">0.00 A</strong><small>Based on selected phase</small></article><article class="protection-card" id="protection-result"><div><span>Protection review</span><strong id="schedule-protection">--</strong></div><small id="schedule-capacity">Cable capacity: --</small><small id="schedule-rcd-result">RCD: --</small><small id="schedule-balance-result">Phase balance: --</small><small id="schedule-neutral-result">Estimated neutral: --</small></article><article class="schedule-status" id="schedule-status"><i class="fa-solid fa-circle-check"></i><div><strong>Ready for review</strong><p>Check protective devices and installation conditions against the applicable standard.</p></div></article></div>`;
   $('.page-content').appendChild(section);
   [['Lighting circuit', 1.2, 1, .95, .8], ['Socket outlets', 3, 1, .9, .6], ['Small motor', 4, 1, .82, .7]].forEach(row => addScheduleRow(...row));
 }
 
 function addScheduleRow(name = 'New circuit', load = 1, quantity = 1, pf = .9, diversity = .8) {
   const row = document.createElement('tr');
-  row.innerHTML = `<td><input class="schedule-name" value="${escapeHtml(name)}" maxlength="60"></td><td><input class="schedule-load" type="number" value="${escapeHtml(load)}" min="0" step="0.1"></td><td><input class="schedule-qty" type="number" value="${escapeHtml(quantity)}" min="1" step="1"></td><td><input class="schedule-pf" type="number" value="${escapeHtml(pf)}" min="0.01" max="1" step="0.01"></td><td><input class="schedule-diversity" type="number" value="${escapeHtml(diversity)}" min="0.01" max="1" step="0.01"></td><td><button class="delete-schedule-row" aria-label="Delete circuit"><i class="fa-solid fa-trash"></i></button></td>`;
+  row.innerHTML = `<td><input class="schedule-name" value="${escapeHtml(name)}" maxlength="60"></td><td><input class="schedule-load" type="number" value="${escapeHtml(load)}" min="0" step="0.1"></td><td><input class="schedule-qty" type="number" value="${escapeHtml(quantity)}" min="1" step="1"></td><td><input class="schedule-pf" type="number" value="${escapeHtml(pf)}" min="0.01" max="1" step="0.01"></td><td><input class="schedule-diversity" type="number" value="${escapeHtml(diversity)}" min="0.01" max="1" step="0.01"></td><td><select class="schedule-row-phase" aria-label="Circuit phase"><option value="phase-a">Phase A</option><option value="phase-b">Phase B</option><option value="phase-c">Phase C</option></select></td><td><button class="delete-schedule-row" aria-label="Delete circuit"><i class="fa-solid fa-trash"></i></button></td>`;
   $('#schedule-body').appendChild(row);
 }
 
@@ -85,7 +85,8 @@ function calculateSchedule() {
       load: Number($('.schedule-load', row).value),
       quantity: Number($('.schedule-qty', row).value),
       pf: Number($('.schedule-pf', row).value),
-      diversity: Number($('.schedule-diversity', row).value)
+      diversity: Number($('.schedule-diversity', row).value),
+      phase: $('.schedule-row-phase', row).value
     }))
   });
   if (!result.valid) {
@@ -98,10 +99,12 @@ function calculateSchedule() {
   $('#schedule-protection').textContent = `${result.cable.breaker}A Type C · ${result.cable.size} mm²`;
   $('#schedule-capacity').textContent = `Derated cable capacity: ${result.deratedCapacity.toFixed(1)} A`;
   $('#schedule-rcd-result').textContent = `RCD: ${$('#schedule-rcd').value === 'recommended' ? '30 mA protection recommended' : 'Confirm requirement separately'}`;
+  $('#schedule-balance-result').textContent = `Phase balance: ${result.balancePercent.toFixed(1)}% spread`;
+  $('#schedule-neutral-result').textContent = `Estimated neutral: ${result.neutralCurrent.toFixed(2)} A`;
   const status = $('#schedule-status');
   status.className = `schedule-status ${result.needsReview ? 'review' : ''}`;
   status.querySelector('strong').textContent = result.needsReview ? 'Review required' : 'Protection coordinated for exercise';
-  status.querySelector('p').textContent = result.needsReview ? 'Verify feeder protection, cable capacity, and applicable standards before use.' : 'The training breaker is within the selected cable capacity after derating.';
+  status.querySelector('p').textContent = result.needsReview ? `Verify feeder protection, cable capacity, phase balance, and applicable standards before use.${result.phaseWarnings.length ? ` ${result.phaseWarnings.join('. ')}.` : ''}` : 'The training breaker is within the selected cable capacity after derating.';
 }
 
 function calculateLoad(event) {
@@ -270,7 +273,9 @@ function createComponent(type, x, y) {
   const [label, symbol] = labels[type] || [type, '?'];
   const element = document.createElement('div');
   element.className = 'circuit-component'; element.id = id; element.dataset.type = type; element.dataset.state = ['mcb', 'rcd'].includes(type) ? 'on' : 'off'; element.draggable = true; element.style.left = `${Math.max(0, x)}px`; element.style.top = `${Math.max(0, y)}px`;
-  const extraTerminal = type === 'junction' ? '<button class="circuit-terminal terminal-branch" data-terminal="branch" aria-label="Junction branch terminal"></button>' : '';
+  const extraTerminal = type === 'junction'
+    ? '<button class="circuit-terminal terminal-branch-a" data-terminal="branch-a" aria-label="Junction branch A terminal"></button><button class="circuit-terminal terminal-branch-b" data-terminal="branch-b" aria-label="Junction branch B terminal"></button>'
+    : '';
   element.innerHTML = `<button class="circuit-terminal terminal-in" data-terminal="in" aria-label="${label} input terminal"></button><div class="component-symbol">${symbol}</div><span class="component-label">${label}</span><button class="circuit-terminal terminal-out" data-terminal="out" aria-label="${label} output terminal"></button>${extraTerminal}<button class="remove-component" aria-label="Remove component"><i class="fa-solid fa-xmark"></i></button>`;
   element.addEventListener('dragstart', event => { const rect = element.getBoundingClientRect(); event.dataTransfer.setData('existing-id', id); event.dataTransfer.setData('offset-x', event.clientX - rect.left); event.dataTransfer.setData('offset-y', event.clientY - rect.top); });
   element.addEventListener('click', event => {
@@ -402,12 +407,30 @@ function validateCircuit() {
   const hasRcd = components.some(item => item.dataset.type === 'rcd');
   const hasEarthPath = circuitConnections.some(connection => connection.conductor === 'earth');
   const terminalConnections = circuitConnections.filter(connection => connection.fromTerminal && connection.toTerminal);
-  const terminalsComplete = terminalConnections.length === circuitConnections.length;
+  const terminalRules = circuitConnections.every(connection => {
+    const from = $(`#${connection.from}`);
+    const to = $(`#${connection.to}`);
+    if (!from || !to) return false;
+    const fromTerminals = $$('.circuit-terminal', from).map(item => item.dataset.terminal);
+    const toTerminals = $$('.circuit-terminal', to).map(item => item.dataset.terminal);
+    return fromTerminals.includes(connection.fromTerminal) && toTerminals.includes(connection.toTerminal);
+  });
+  const destinationUse = new Map();
+  circuitConnections.forEach(connection => {
+    const key = `${connection.to}:${connection.toTerminal}:${connection.conductor || 'line'}`;
+    destinationUse.set(key, (destinationUse.get(key) || 0) + 1);
+  });
+  const destinationsUnique = [...destinationUse.values()].every(count => count === 1);
+  const terminalsComplete = terminalConnections.length === circuitConnections.length && terminalRules;
   const junctions = components.filter(item => item.dataset.type === 'junction');
-  const junctionsComplete = junctions.every(junction => circuitConnections.filter(connection => connection.from === junction.id || connection.to === junction.id).length >= 3);
+  const junctionsComplete = junctions.every(junction => {
+    const links = circuitConnections.filter(connection => connection.from === junction.id || connection.to === junction.id);
+    return links.length >= 3 && links.some(connection => connection.from === junction.id && connection.fromTerminal === 'branch-a') &&
+      links.some(connection => connection.from === junction.id && connection.fromTerminal === 'branch-b');
+  });
   const earthLeakageReady = fault !== 'earth-leakage' || (hasRcd && hasEarthPath);
-  const complete = Boolean(source && loads.length && hasProtection && connectedLoad && lineConnectedLoad && terminalsComplete && junctionsComplete && earthLeakageReady && circuitConnections.length >= components.length - 1);
-  const message = !source ? 'Add a source.' : !loads.length ? 'Add at least one load.' : !hasProtection ? 'Add an MCB or RCD.' : !connectedLoad ? 'Connect the source path to a load.' : !lineConnectedLoad ? 'Add a line / phase conductor path to a load.' : !terminalsComplete ? 'Reconnect wires using the visible input and output terminals.' : !junctionsComplete ? 'Connect each junction input and both branch terminals.' : !earthLeakageReady ? 'Earth leakage requires an RCD and protective-earth path.' : complete ? 'Topology is complete for this training exercise.' : 'Connect every component into one circuit path.';
+  const complete = Boolean(source && loads.length && hasProtection && connectedLoad && lineConnectedLoad && terminalsComplete && destinationsUnique && junctionsComplete && earthLeakageReady && circuitConnections.length >= components.length - 1);
+  const message = !source ? 'Add a source.' : !loads.length ? 'Add at least one load.' : !hasProtection ? 'Add an MCB or RCD.' : !connectedLoad ? 'Connect the source path to a load.' : !lineConnectedLoad ? 'Add a line / phase conductor path to a load.' : !terminalsComplete ? 'Use valid terminals for every wire.' : !destinationsUnique ? 'Do not duplicate a destination terminal on the same conductor.' : !junctionsComplete ? 'Connect each junction input and both branch terminals.' : !earthLeakageReady ? 'Earth leakage requires an RCD and protective-earth path.' : complete ? 'Topology is complete for this training exercise.' : 'Connect every component into one circuit path.';
   $('#circuit-validation').textContent = complete ? 'Circuit valid' : 'Review required';
   $('#circuit-validation').className = complete ? 'validation-good' : 'validation-warning';
   $('#circuit-message').textContent = message;
@@ -474,12 +497,14 @@ function checkCircuitLogic() {
   const components = $$('.circuit-component'); const source = components.find(item => ['source-ac', 'battery'].includes(item.dataset.type)); const loads = components.filter(item => ['lamp', 'socket', 'motor'].includes(item.dataset.type));
   const closed = components.filter(item => ['switch-1way', 'mcb', 'rcd'].includes(item.dataset.type)).every(item => item.dataset.state === 'on');
   const fault = $('#circuit-fault')?.value || circuitFault;
+  const leakage = fault === 'earth-leakage' && valid;
   const powered = valid && closed && fault === 'none';
   const voltage = powered ? (source.dataset.type === 'battery' ? 12 : 230) : 0;
   const normalCurrent = loads.reduce((total, item) => total + ({ lamp: .5, socket: 5, motor: 6 }[item.dataset.type] || 0), 0);
-  const current = fault === 'short' && valid ? 80 : powered ? normalCurrent : 0;
+  const current = fault === 'short' && valid ? 80 : leakage ? .03 : powered ? normalCurrent : 0;
   $('#sim-status').textContent = fault === 'open' ? 'Fault: open circuit' : fault === 'short' ? 'Fault: short circuit' : fault === 'earth-leakage' ? 'Fault: earth leakage' : isSimulating ? 'Simulation running' : 'Simulation stopped';
-  $('#sim-v').textContent = voltage; $('#sim-i').textContent = current.toFixed(1); $('#sim-p').textContent = (voltage * current).toFixed(0);
+  const faultVoltage = leakage ? (source.dataset.type === 'battery' ? 12 : 230) : voltage;
+  $('#sim-v').textContent = faultVoltage; $('#sim-i').textContent = current.toFixed(fault === 'earth-leakage' ? 2 : 1); $('#sim-p').textContent = (faultVoltage * current).toFixed(0);
   loads.forEach(load => load.dataset.powered = powered ? 'true' : 'false');
   $('#circuit-message').textContent = fault === 'open' ? 'Open-circuit fault injected; no load current should flow.' : fault === 'short' ? 'Short-circuit fault injected; protective devices should be reviewed.' : fault === 'earth-leakage' ? 'Earth-leakage fault injected; verify RCD protection.' : $('#circuit-message').textContent;
 }
