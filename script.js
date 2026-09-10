@@ -264,11 +264,12 @@ function exportPdf() {
 function createComponent(type, x, y) {
   if (!restoringCircuit) pushCircuitHistory();
   const id = `component-${componentId++}`;
-  const labels = { 'source-ac': ['AC mains', '∿'], battery: ['Battery', '＋'], mcb: ['MCB', 'M'], rcd: ['RCD', 'R'], 'switch-1way': ['Switch', '╱'], lamp: ['Lamp', '◉'], socket: ['Socket', 'S'], motor: ['Motor', 'M'] };
+  const labels = { 'source-ac': ['AC mains', '∿'], battery: ['Battery', '＋'], mcb: ['MCB', 'M'], rcd: ['RCD', 'R'], 'switch-1way': ['Switch', '╱'], junction: ['Junction', '＋'], lamp: ['Lamp', '◉'], socket: ['Socket', 'S'], motor: ['Motor', 'M'] };
   const [label, symbol] = labels[type] || [type, '?'];
   const element = document.createElement('div');
   element.className = 'circuit-component'; element.id = id; element.dataset.type = type; element.dataset.state = ['mcb', 'rcd'].includes(type) ? 'on' : 'off'; element.draggable = true; element.style.left = `${Math.max(0, x)}px`; element.style.top = `${Math.max(0, y)}px`;
-  element.innerHTML = `<button class="circuit-terminal terminal-in" data-terminal="in" aria-label="${label} input terminal"></button><div class="component-symbol">${symbol}</div><span class="component-label">${label}</span><button class="circuit-terminal terminal-out" data-terminal="out" aria-label="${label} output terminal"></button><button class="remove-component" aria-label="Remove component"><i class="fa-solid fa-xmark"></i></button>`;
+  const extraTerminal = type === 'junction' ? '<button class="circuit-terminal terminal-branch" data-terminal="branch" aria-label="Junction branch terminal"></button>' : '';
+  element.innerHTML = `<button class="circuit-terminal terminal-in" data-terminal="in" aria-label="${label} input terminal"></button><div class="component-symbol">${symbol}</div><span class="component-label">${label}</span><button class="circuit-terminal terminal-out" data-terminal="out" aria-label="${label} output terminal"></button>${extraTerminal}<button class="remove-component" aria-label="Remove component"><i class="fa-solid fa-xmark"></i></button>`;
   element.addEventListener('dragstart', event => { const rect = element.getBoundingClientRect(); event.dataTransfer.setData('existing-id', id); event.dataTransfer.setData('offset-x', event.clientX - rect.left); event.dataTransfer.setData('offset-y', event.clientY - rect.top); });
   element.addEventListener('click', event => {
     if (event.target.closest('.remove-component')) { removeComponent(id); return; }
@@ -388,8 +389,10 @@ function validateCircuit() {
   const connectedLoad = loads.some(load => reachable.has(load.id));
   const terminalConnections = circuitConnections.filter(connection => connection.fromTerminal && connection.toTerminal);
   const terminalsComplete = terminalConnections.length === circuitConnections.length;
-  const complete = Boolean(source && loads.length && hasProtection && connectedLoad && terminalsComplete && circuitConnections.length >= components.length - 1);
-  const message = !source ? 'Add a source.' : !loads.length ? 'Add at least one load.' : !hasProtection ? 'Add an MCB or RCD.' : !connectedLoad ? 'Connect the source path to a load.' : !terminalsComplete ? 'Reconnect wires using the visible input and output terminals.' : complete ? 'Topology is complete for this training exercise.' : 'Connect every component into one circuit path.';
+  const junctions = components.filter(item => item.dataset.type === 'junction');
+  const junctionsComplete = junctions.every(junction => circuitConnections.filter(connection => connection.from === junction.id || connection.to === junction.id).length >= 3);
+  const complete = Boolean(source && loads.length && hasProtection && connectedLoad && terminalsComplete && junctionsComplete && circuitConnections.length >= components.length - 1);
+  const message = !source ? 'Add a source.' : !loads.length ? 'Add at least one load.' : !hasProtection ? 'Add an MCB or RCD.' : !connectedLoad ? 'Connect the source path to a load.' : !terminalsComplete ? 'Reconnect wires using the visible input and output terminals.' : !junctionsComplete ? 'Connect each junction input and both branch terminals.' : complete ? 'Topology is complete for this training exercise.' : 'Connect every component into one circuit path.';
   $('#circuit-validation').textContent = complete ? 'Circuit valid' : 'Review required';
   $('#circuit-validation').className = complete ? 'validation-good' : 'validation-warning';
   $('#circuit-message').textContent = message;
