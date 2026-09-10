@@ -13,19 +13,23 @@ create table if not exists public.projects (
 
 alter table public.projects enable row level security;
 
+drop policy if exists "Users can read their projects" on public.projects;
 create policy "Users can read their projects"
   on public.projects for select
   using (auth.uid() = owner_id);
 
+drop policy if exists "Users can create their projects" on public.projects;
 create policy "Users can create their projects"
   on public.projects for insert
   with check (auth.uid() = owner_id);
 
+drop policy if exists "Users can update their projects" on public.projects;
 create policy "Users can update their projects"
   on public.projects for update
   using (auth.uid() = owner_id)
   with check (auth.uid() = owner_id);
 
+drop policy if exists "Users can delete their projects" on public.projects;
 create policy "Users can delete their projects"
   on public.projects for delete
   using (auth.uid() = owner_id);
@@ -33,6 +37,8 @@ create policy "Users can delete their projects"
 create or replace function public.touch_projects_updated_at()
 returns trigger
 language plpgsql
+security invoker
+set search_path = public
 as $$
 begin
   new.updated_at = now();

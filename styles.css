@@ -17,6 +17,8 @@
 * { box-sizing: border-box; }
 html { min-width: 320px; background: var(--canvas); }
 body { margin: 0; color: var(--ink); background: var(--canvas); font-family: "DM Sans", sans-serif; }
+.skip-link { position: fixed; top: 0; left: 1rem; z-index: 10; padding: .65rem 1rem; color: white; background: var(--navy); transform: translateY(-150%); transition: transform .2s ease; }
+.skip-link:focus { transform: translateY(0); }
 button, input, select { font: inherit; }
 button { border: 0; cursor: pointer; }
 .app-shell { display: flex; min-height: 100vh; }

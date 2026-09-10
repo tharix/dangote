@@ -61,7 +61,7 @@ function insertLoadScheduleModule() {
 
 function addScheduleRow(name = 'New circuit', load = 1, quantity = 1, pf = .9, diversity = .8) {
   const row = document.createElement('tr');
-  row.innerHTML = `<td><input class="schedule-name" value="${name}" maxlength="60"></td><td><input class="schedule-load" type="number" value="${load}" min="0" step="0.1"></td><td><input class="schedule-qty" type="number" value="${quantity}" min="1" step="1"></td><td><input class="schedule-pf" type="number" value="${pf}" min="0.01" max="1" step="0.01"></td><td><input class="schedule-diversity" type="number" value="${diversity}" min="0.01" max="1" step="0.01"></td><td><button class="delete-schedule-row" aria-label="Delete circuit"><i class="fa-solid fa-trash"></i></button></td>`;
+  row.innerHTML = `<td><input class="schedule-name" value="${escapeHtml(name)}" maxlength="60"></td><td><input class="schedule-load" type="number" value="${escapeHtml(load)}" min="0" step="0.1"></td><td><input class="schedule-qty" type="number" value="${escapeHtml(quantity)}" min="1" step="1"></td><td><input class="schedule-pf" type="number" value="${escapeHtml(pf)}" min="0.01" max="1" step="0.01"></td><td><input class="schedule-diversity" type="number" value="${escapeHtml(diversity)}" min="0.01" max="1" step="0.01"></td><td><button class="delete-schedule-row" aria-label="Delete circuit"><i class="fa-solid fa-trash"></i></button></td>`;
   $('#schedule-body').appendChild(row);
 }
 
