@@ -377,7 +377,6 @@ function redoCircuit() {
 
 function validateCircuit() {
   const components = $$('.circuit-component');
-  const types = components.map(item => item.dataset.type);
   const source = components.find(item => ['source-ac', 'battery'].includes(item.dataset.type));
   const loads = components.filter(item => ['lamp', 'socket', 'motor'].includes(item.dataset.type));
   const protectedTypes = ['mcb', 'rcd'];
@@ -388,12 +387,25 @@ function validateCircuit() {
   const queue = source ? [source.id] : [];
   while (queue.length) graph.get(queue.shift()).forEach(id => { if (!reachable.has(id)) { reachable.add(id); queue.push(id); } });
   const connectedLoad = loads.some(load => reachable.has(load.id));
+  const lineGraph = new Map(components.map(item => [item.id, []]));
+  circuitConnections.filter(connection => connection.conductor === 'line').forEach(connection => {
+    lineGraph.get(connection.from)?.push(connection.to);
+    lineGraph.get(connection.to)?.push(connection.from);
+  });
+  const lineReachable = new Set(source ? [source.id] : []);
+  const lineQueue = source ? [source.id] : [];
+  while (lineQueue.length) lineGraph.get(lineQueue.shift()).forEach(id => { if (!lineReachable.has(id)) { lineReachable.add(id); lineQueue.push(id); } });
+  const lineConnectedLoad = loads.some(load => lineReachable.has(load.id));
+  const fault = $('#circuit-fault')?.value || circuitFault;
+  const hasRcd = components.some(item => item.dataset.type === 'rcd');
+  const hasEarthPath = circuitConnections.some(connection => connection.conductor === 'earth');
   const terminalConnections = circuitConnections.filter(connection => connection.fromTerminal && connection.toTerminal);
   const terminalsComplete = terminalConnections.length === circuitConnections.length;
   const junctions = components.filter(item => item.dataset.type === 'junction');
   const junctionsComplete = junctions.every(junction => circuitConnections.filter(connection => connection.from === junction.id || connection.to === junction.id).length >= 3);
-  const complete = Boolean(source && loads.length && hasProtection && connectedLoad && terminalsComplete && junctionsComplete && circuitConnections.length >= components.length - 1);
-  const message = !source ? 'Add a source.' : !loads.length ? 'Add at least one load.' : !hasProtection ? 'Add an MCB or RCD.' : !connectedLoad ? 'Connect the source path to a load.' : !terminalsComplete ? 'Reconnect wires using the visible input and output terminals.' : !junctionsComplete ? 'Connect each junction input and both branch terminals.' : complete ? 'Topology is complete for this training exercise.' : 'Connect every component into one circuit path.';
+  const earthLeakageReady = fault !== 'earth-leakage' || (hasRcd && hasEarthPath);
+  const complete = Boolean(source && loads.length && hasProtection && connectedLoad && lineConnectedLoad && terminalsComplete && junctionsComplete && earthLeakageReady && circuitConnections.length >= components.length - 1);
+  const message = !source ? 'Add a source.' : !loads.length ? 'Add at least one load.' : !hasProtection ? 'Add an MCB or RCD.' : !connectedLoad ? 'Connect the source path to a load.' : !lineConnectedLoad ? 'Add a line / phase conductor path to a load.' : !terminalsComplete ? 'Reconnect wires using the visible input and output terminals.' : !junctionsComplete ? 'Connect each junction input and both branch terminals.' : !earthLeakageReady ? 'Earth leakage requires an RCD and protective-earth path.' : complete ? 'Topology is complete for this training exercise.' : 'Connect every component into one circuit path.';
   $('#circuit-validation').textContent = complete ? 'Circuit valid' : 'Review required';
   $('#circuit-validation').className = complete ? 'validation-good' : 'validation-warning';
   $('#circuit-message').textContent = message;
@@ -410,6 +422,7 @@ function serialiseCircuit() {
 
 function restoreCircuit(data) {
   if (!data || ![1, 2].includes(data.version) || !Array.isArray(data.components) || !Array.isArray(data.connections)) throw new Error('Unsupported circuit file.');
+  if (data.connections.some(connection => !['line', 'neutral', 'earth'].includes(connection.conductor || 'line'))) throw new Error('Unsupported conductor type.');
   restoringCircuit = true;
   $('#circuit-canvas').querySelectorAll('.circuit-component').forEach(item => item.remove());
   circuitConnections = [];
