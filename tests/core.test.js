@@ -16,6 +16,18 @@ test('rejects invalid load factors', () => {
   const result = calculateLoadSizing({
     phase: 1, loadType: 'kw', loadValue: 10, pf: 1.2, diversity: .8, installMethod: 'clipped'
   });
+
+  test('accounts for cable length and correction factors', () => {
+    const result = calculateLoadSizing({
+      phase: 1, loadType: 'kw', loadValue: 10, pf: .85, diversity: .8,
+      installMethod: 'conduit', cableLength: 75, ambientFactor: .94, groupingFactor: .8
+    });
+    assert.equal(result.valid, true);
+    assert.equal(result.cable.size, 16);
+    assert.equal(result.derating, .6016);
+    assert.equal(result.cableLength, 75);
+    assert.equal(result.voltageDropPercent > 0, true);
+  });
   assert.equal(result.valid, false);
 });
 

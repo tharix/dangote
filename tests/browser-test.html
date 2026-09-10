@@ -8,13 +8,14 @@
 <body>
   <h1>Browser tests</h1>
   <ul id="results"></ul>
-  <script src="../core.js"></script>
+  <script src="../core.js?v=20260910-1632"></script>
   <script>
     const results = document.querySelector('#results');
     const tests = [
       ['valid load sizing', () => DangoteAcademyCore.calculateLoadSizing({ phase: 1, loadType: 'kw', loadValue: 10, pf: .85, diversity: .8, installMethod: 'conduit' }).valid],
       ['invalid power factor rejected', () => !DangoteAcademyCore.calculateLoadSizing({ phase: 1, loadType: 'kw', loadValue: 10, pf: 1.2, diversity: .8, installMethod: 'clipped' }).valid],
-      ['schedule demand calculated', () => DangoteAcademyCore.calculateScheduleSizing({ phase: 1, method: 'clipped', rcd: 'recommended', rows: [{ load: 1.2, quantity: 1, pf: .95, diversity: .8 }] }).demand === .96]
+      ['schedule demand calculated', () => DangoteAcademyCore.calculateScheduleSizing({ phase: 1, method: 'clipped', rcd: 'recommended', rows: [{ load: 1.2, quantity: 1, pf: .95, diversity: .8 }] }).demand === .96],
+      ['correction factors change cable selection', () => DangoteAcademyCore.calculateLoadSizing({ phase: 1, loadType: 'kw', loadValue: 10, pf: .85, diversity: .8, installMethod: 'conduit', cableLength: 75, ambientFactor: .94, groupingFactor: .8 }).cable.size === 16]
     ];
     tests.forEach(([name, run]) => {
       const item = document.createElement('li');

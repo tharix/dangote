@@ -18,6 +18,10 @@ let pendingConnection = null;
 let circuitConnections = [];
 let simulationSeconds = 0;
 let simulationTimer = null;
+let circuitFault = 'none';
+let circuitHistory = [];
+let circuitRedo = [];
+let restoringCircuit = false;
 
 const componentCatalog = [
   { name: 'Miniature circuit breaker', category: 'protection', icon: 'fa-toggle-on', description: 'Protects final circuits from overload and short circuit conditions.', tags: ['Type C', '1-63 A'] },
@@ -105,9 +109,11 @@ function calculateLoad(event) {
   const loadValue = Number($('#calc-load-value').value);
   const pf = Number($('#calc-pf').value);
   const diversity = Number($('#calc-diversity').value);
+  const cableLength = Number($('#calc-length').value);
+  const ambientFactor = Number($('#calc-ambient').value);
+  const groupingFactor = Number($('#calc-grouping').value);
   const installMethod = $('#calc-install-method').value;
-
-  const result = window.DangoteAcademyCore.calculateLoadSizing({ phase, loadType, loadValue, pf, diversity, installMethod });
+  const result = window.DangoteAcademyCore.calculateLoadSizing({ phase, loadType, loadValue, pf, diversity, installMethod, cableLength, ambientFactor, groupingFactor });
   if (!result.valid) {
     showToast(result.error);
     return;
@@ -119,6 +125,10 @@ function calculateLoad(event) {
   $('#res-breaker').textContent = `${result.cable.breaker}A Type C`;
   $('#res-vdrop').textContent = `${result.voltageDrop} V`;
   $('#res-vdrop').className = result.voltageDrop > result.voltage * .05 ? 'warning' : 'safe';
+  const derating = Number.isFinite(result.derating) ? result.derating : result.actualCapacity / result.cable.capacity;
+  const voltageDropPercent = Number.isFinite(result.voltageDropPercent) ? result.voltageDropPercent : result.voltageDrop / result.voltage * 100;
+  $('#res-derating').textContent = `${(derating * 100).toFixed(0)}`;
+  $('#res-vdrop-percent').textContent = voltageDropPercent.toFixed(2);
   lastCalculation = { cable: result.cable, breaker: `${result.cable.breaker}A Type C` };
   showToast('Cable sizing result updated.');
 }
@@ -252,6 +262,7 @@ function exportPdf() {
 }
 
 function createComponent(type, x, y) {
+  if (!restoringCircuit) pushCircuitHistory();
   const id = `component-${componentId++}`;
   const labels = { 'source-ac': ['AC mains', '∿'], battery: ['Battery', '＋'], mcb: ['MCB', 'M'], rcd: ['RCD', 'R'], 'switch-1way': ['Switch', '╱'], lamp: ['Lamp', '◉'], socket: ['Socket', 'S'], motor: ['Motor', 'M'] };
   const [label, symbol] = labels[type] || [type, '?'];
@@ -276,11 +287,12 @@ function dropComponent(event) {
   const existingId = event.dataTransfer.getData('existing-id');
   const x = Math.round((event.clientX - rect.left - (Number(event.dataTransfer.getData('offset-x')) || 0)) / 20) * 20;
   const y = Math.round((event.clientY - rect.top - (Number(event.dataTransfer.getData('offset-y')) || 0)) / 20) * 20;
-  if (existingId) { const item = $(`#${existingId}`); if (item) { item.style.left = `${Math.max(0, x)}px`; item.style.top = `${Math.max(0, y)}px`; renderCircuitWires(); } return; }
+  if (existingId) { const item = $(`#${existingId}`); if (item) { pushCircuitHistory(); item.style.left = `${Math.max(0, x)}px`; item.style.top = `${Math.max(0, y)}px`; renderCircuitWires(); } return; }
   const type = event.dataTransfer.getData('type'); if (type) createComponent(type, x, y);
 }
 
 function removeComponent(id) {
+  pushCircuitHistory();
   circuitConnections = circuitConnections.filter(connection => connection.from !== id && connection.to !== id);
   $(`#${id}`)?.remove();
   pendingConnection = null;
@@ -298,7 +310,7 @@ function selectConnectionEndpoint(id) {
   }
   if (pendingConnection === id) return;
   const duplicate = circuitConnections.some(connection => (connection.from === pendingConnection && connection.to === id) || (connection.from === id && connection.to === pendingConnection));
-  if (!duplicate) circuitConnections.push({ from: pendingConnection, to: id });
+  if (!duplicate) { pushCircuitHistory(); circuitConnections.push({ from: pendingConnection, to: id }); }
   $$('.connection-selected').forEach(item => item.classList.remove('connection-selected'));
   pendingConnection = null;
   renderCircuitWires();
@@ -327,6 +339,33 @@ function renderCircuitWires() {
 function updateCircuitSummary() {
   $('#circuit-component-count').textContent = $$('.circuit-component').length;
   $('#circuit-connection-count').textContent = circuitConnections.length;
+}
+
+function updateCircuitHistoryControls() {
+  $('#undo-circuit').disabled = circuitHistory.length === 0;
+  $('#redo-circuit').disabled = circuitRedo.length === 0;
+}
+
+function pushCircuitHistory() {
+  if (restoringCircuit) return;
+  circuitHistory.push(JSON.stringify(serialiseCircuit()));
+  if (circuitHistory.length > 50) circuitHistory.shift();
+  circuitRedo = [];
+  updateCircuitHistoryControls();
+}
+
+function undoCircuit() {
+  if (!circuitHistory.length) return;
+  circuitRedo.push(JSON.stringify(serialiseCircuit()));
+  restoreCircuit(JSON.parse(circuitHistory.pop()), true);
+  updateCircuitHistoryControls();
+}
+
+function redoCircuit() {
+  if (!circuitRedo.length) return;
+  circuitHistory.push(JSON.stringify(serialiseCircuit()));
+  restoreCircuit(JSON.parse(circuitRedo.pop()), true);
+  updateCircuitHistoryControls();
 }
 
 function validateCircuit() {
@@ -360,6 +399,7 @@ function serialiseCircuit() {
 
 function restoreCircuit(data) {
   if (!data || data.version !== 1 || !Array.isArray(data.components) || !Array.isArray(data.connections)) throw new Error('Unsupported circuit file.');
+  restoringCircuit = true;
   $('#circuit-canvas').querySelectorAll('.circuit-component').forEach(item => item.remove());
   circuitConnections = [];
   const ids = data.components.map(item => createComponent(item.type, item.left, item.top));
@@ -373,6 +413,7 @@ function restoreCircuit(data) {
   renderCircuitWires();
   updateCircuitSummary();
   validateCircuit();
+  restoringCircuit = false;
 }
 
 function saveCircuit() {
@@ -406,11 +447,15 @@ function checkCircuitLogic() {
   const valid = validateCircuit();
   const components = $$('.circuit-component'); const source = components.find(item => ['source-ac', 'battery'].includes(item.dataset.type)); const loads = components.filter(item => ['lamp', 'socket', 'motor'].includes(item.dataset.type));
   const closed = components.filter(item => ['switch-1way', 'mcb', 'rcd'].includes(item.dataset.type)).every(item => item.dataset.state === 'on');
-  const powered = valid && closed;
+  const fault = $('#circuit-fault')?.value || circuitFault;
+  const powered = valid && closed && fault === 'none';
   const voltage = powered ? (source.dataset.type === 'battery' ? 12 : 230) : 0;
-  const current = powered ? loads.reduce((total, item) => total + ({ lamp: .5, socket: 5, motor: 6 }[item.dataset.type] || 0), 0) : 0;
+  const normalCurrent = loads.reduce((total, item) => total + ({ lamp: .5, socket: 5, motor: 6 }[item.dataset.type] || 0), 0);
+  const current = fault === 'short' && valid ? 80 : powered ? normalCurrent : 0;
+  $('#sim-status').textContent = fault === 'open' ? 'Fault: open circuit' : fault === 'short' ? 'Fault: short circuit' : fault === 'earth-leakage' ? 'Fault: earth leakage' : isSimulating ? 'Simulation running' : 'Simulation stopped';
   $('#sim-v').textContent = voltage; $('#sim-i').textContent = current.toFixed(1); $('#sim-p').textContent = (voltage * current).toFixed(0);
   loads.forEach(load => load.dataset.powered = powered ? 'true' : 'false');
+  $('#circuit-message').textContent = fault === 'open' ? 'Open-circuit fault injected; no load current should flow.' : fault === 'short' ? 'Short-circuit fault injected; protective devices should be reviewed.' : fault === 'earth-leakage' ? 'Earth-leakage fault injected; verify RCD protection.' : $('#circuit-message').textContent;
 }
 
 function renderComponentCatalog() {
@@ -467,12 +512,14 @@ function initialise() {
   $('#upload-video').addEventListener('click', () => showToast('Video upload is queued for the next module release.'));
   $$('.component-drag').forEach(item => item.addEventListener('dragstart', event => event.dataTransfer.setData('type', item.dataset.type)));
   $('#circuit-canvas').addEventListener('dragover', event => event.preventDefault()); $('#circuit-canvas').addEventListener('drop', dropComponent);
-  $('#clear-canvas').addEventListener('click', () => { $$('.circuit-component').forEach(item => item.remove()); circuitConnections = []; pendingConnection = null; renderCircuitWires(); updateCircuitSummary(); validateCircuit(); if (isSimulating) toggleSimulation(); });
+  $('#clear-canvas').addEventListener('click', () => { pushCircuitHistory(); $$('.circuit-component').forEach(item => item.remove()); circuitConnections = []; pendingConnection = null; renderCircuitWires(); updateCircuitSummary(); validateCircuit(); if (isSimulating) toggleSimulation(); });
   $('#simulate-circuit').addEventListener('click', toggleSimulation);
+  $('#circuit-fault').addEventListener('change', event => { circuitFault = event.target.value; checkCircuitLogic(); });
+  $('#undo-circuit').addEventListener('click', undoCircuit); $('#redo-circuit').addEventListener('click', redoCircuit);
   $('#connect-mode').addEventListener('click', event => { connectMode = !connectMode; event.currentTarget.classList.toggle('active', connectMode); showToast(connectMode ? 'Connection mode enabled.' : 'Connection mode disabled.'); });
   $('#validate-circuit').addEventListener('click', validateCircuit);
   $('#save-circuit').addEventListener('click', saveCircuit); $('#load-circuit').addEventListener('click', loadCircuit); $('#export-circuit').addEventListener('click', exportCircuit); $('#import-circuit').addEventListener('click', () => $('#circuit-file').click()); $('#circuit-file').addEventListener('change', importCircuit);
-  calculateSchedule(); updateCircuitSummary(); validateCircuit();
+  calculateLoad({ preventDefault() {} }); calculateSchedule(); updateCircuitSummary(); validateCircuit(); updateCircuitHistoryControls();
 }
 
 document.addEventListener('DOMContentLoaded', initialise);

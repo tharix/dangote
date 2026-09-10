@@ -38,6 +38,12 @@ Runtime libraries are vendored under `assets/vendor/`. The application does not 
 
 The circuit builder supports AC mains and battery sources, MCB/RCD protection, switches, lamps, sockets, and motors. Enable **Connect components**, click two components to create a wire, and use **Validate circuit** to check source, protection, load, and connectivity requirements. Diagrams can be saved locally, loaded, exported as JSON, and imported from JSON. Simulation reports voltage, current, power, and estimated energy for the training circuit.
 
+Undo/redo is available for diagram edits, and fault modes simulate open circuits, short circuits, and earth leakage for classroom exercises.
+
+## Engineering calculator
+
+Cable sizing accepts cable length, ambient-temperature correction, and grouping correction factors. Results show adjusted derating and voltage-drop percentage. These remain training estimates and must be checked against the applicable installation standard before field use.
+
 ## Team workflow
 
 Use short branches and pull requests. Keep calculation logic in `core.js`, UI wiring in `script.js`, and update tests when engineering rules change. See [CONTRIBUTING.md](./CONTRIBUTING.md).

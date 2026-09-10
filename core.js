@@ -17,8 +17,9 @@
 
   const deratingFactors = { clipped: 1, conduit: .8, tray: .9, ground: .7 };
 
-  function calculateLoadSizing({ phase, loadType, loadValue, pf, diversity, installMethod }) {
-    if (!Number.isFinite(loadValue) || loadValue <= 0 || pf <= 0 || pf > 1 || diversity <= 0 || diversity > 1) {
+  function calculateLoadSizing({ phase, loadType, loadValue, pf, diversity, installMethod, cableLength = 50, ambientFactor = 1, groupingFactor = 1 }) {
+    if (!Number.isFinite(loadValue) || loadValue <= 0 || pf <= 0 || pf > 1 || diversity <= 0 || diversity > 1 ||
+      !Number.isFinite(cableLength) || cableLength <= 0 || ambientFactor <= 0 || ambientFactor > 1 || groupingFactor <= 0 || groupingFactor > 1) {
       return { valid: false, error: 'Enter valid load, power factor, and diversity values.' };
     }
     const voltage = phase === 1 ? 230 : 400;
@@ -31,9 +32,9 @@
     const current = loadType === 'amps'
       ? loadValue * diversity
       : diversifiedPower / (phase === 1 ? voltage * pf : Math.sqrt(3) * voltage * pf);
-    const derating = deratingFactors[installMethod];
+    const derating = deratingFactors[installMethod] * ambientFactor * groupingFactor;
     const cable = cableOptions.find(item => item.capacity >= current / derating) || cableOptions.at(-1);
-    const voltageDrop = Math.round(cable.drop * current * 50 / 1000 * 100) / 100;
+    const voltageDrop = Math.round(cable.drop * current * cableLength / 1000 * 100) / 100;
     return {
       valid: true,
       current: Math.round(current * 100) / 100,
@@ -41,6 +42,9 @@
       voltageDrop,
       actualCapacity: Math.round(cable.capacity * derating * 10) / 10,
       methodLabel: { clipped: 'Clipped direct', conduit: 'In conduit', tray: 'Cable tray', ground: 'Direct ground' }[installMethod],
+      derating,
+      cableLength,
+      voltageDropPercent: voltageDrop / voltage * 100,
       voltage
     };
   }
