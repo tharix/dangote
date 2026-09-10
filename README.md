@@ -48,6 +48,8 @@ Cable sizing accepts cable length, ambient-temperature correction, and grouping 
 
 Use short branches and pull requests. Keep calculation logic in `core.js`, UI wiring in `script.js`, and update tests when engineering rules change. The repository assigns default review ownership through [CODEOWNERS](./.github/CODEOWNERS) and checks GitHub Actions updates with Dependabot. See [CONTRIBUTING.md](./CONTRIBUTING.md).
 
+Security concerns should follow the process in [SECURITY.md](./SECURITY.md).
+
 ## Deployment
 
 The [Deploy static app](./.github/workflows/deploy-pages.yml) workflow publishes the repository through GitHub Pages. Enable Pages with **GitHub Actions** as the source in repository settings.
