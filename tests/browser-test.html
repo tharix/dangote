@@ -8,8 +8,8 @@
 <body>
   <h1>Browser tests</h1>
   <ul id="results"></ul>
-  <script src="../core.js?v=20260910-1800"></script>
-  <iframe id="app" src="../index.html?v=20260910-1800" hidden title="application under test"></iframe>
+  <script src="../core.js?v=20260910-1801"></script>
+  <iframe id="app" src="../index.html?v=20260910-1801" hidden title="application under test"></iframe>
   <script>
     const results = document.querySelector('#results');
     const tests = [
@@ -148,6 +148,15 @@
         const saved = JSON.parse(app.localStorage.getItem('dangote-academy-projects'));
         return saved[0].name === 'Browser project' && saved[0].circuit.version === 2 &&
           saved[0].circuit.connections[0].conductor === 'phase-c' && Array.isArray(saved[0].revisions);
+      }],
+      ['guided lessons record completed progress', () => {
+        const app = testApp();
+        loadCircuit(app, ['source-ac', 'mcb', 'lamp'], [
+          connection('source', 'mcb', 'phase-a'), connection('mcb', 'lamp', 'phase-a')
+        ]);
+        app.checkLesson('safe-topology');
+        const progress = JSON.parse(app.localStorage.getItem('dangote-academy-lessons'));
+        return Boolean(progress['safe-topology']) && app.document.querySelector('#lesson-score').textContent === '1';
       }]
     ];
 

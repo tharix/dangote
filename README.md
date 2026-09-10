@@ -50,6 +50,10 @@ Three-phase load schedules assign each circuit to Phase A, B, or C and report ph
 
 Named projects contain the BOQ and circuit diagram together, with up to ten previous snapshots retained as revisions. Projects are written to IndexedDB for larger offline-safe storage and mirrored to localStorage as a compatibility fallback. Use **Export project** and **Import project** to move a complete project between devices without a server.
 
+## Guided learning and review
+
+The Lessons module provides practical circuit exercises with hints, offline progress tracking, and a review JSON export for instructors. The circuit review also displays the dominant phase current for the active training topology. Cloud collaboration remains optional; no Supabase credentials are required for offline use.
+
 ## Team workflow
 
 Use short branches and pull requests. Keep calculation logic in `core.js`, UI wiring in `script.js`, and update tests when engineering rules change. The repository assigns default review ownership through [CODEOWNERS](./.github/CODEOWNERS) and checks GitHub Actions updates with Dependabot. See [CONTRIBUTING.md](./CONTRIBUTING.md).

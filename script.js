@@ -41,6 +41,11 @@ const troubleshootingScenarios = [
   { title: 'Lamp trips the MCB', symptom: 'A lighting circuit trips immediately when a lamp is switched on.', options: ['Inspect for a short circuit in the lamp holder', 'Reduce the diversity factor', 'Change the neutral wire colour'], answer: 0 },
   { title: 'RCD trips during testing', symptom: 'The RCD trips when a portable appliance is connected to an outlet.', options: ['Check the appliance insulation and earth leakage', 'Install a larger MCB', 'Remove the circuit earth conductor'], answer: 0 }
 ];
+const guidedLessons = [
+  { id: 'safe-topology', title: 'Build a protected lighting circuit', objective: 'Create a valid source → MCB → lamp circuit using a phase conductor.', hint: 'Use AC mains, MCB, and Lamp, then connect both wires as line or Phase A/B/C.', check: () => validateCircuit() },
+  { id: 'balanced-phases', title: 'Balance a three-phase schedule', objective: 'Assign equal diversified loads to Phase A, Phase B, and Phase C.', hint: 'Open Load Schedule, choose three-phase, and use equal loads on each phase.', check: () => Number($('#schedule-phase')?.value) === 3 && ['phase-a', 'phase-b', 'phase-c'].every(phase => $$('.schedule-row-phase').some(select => select.value === phase)) },
+  { id: 'fault-response', title: 'Diagnose an earth-leakage fault', objective: 'Enable earth leakage and verify that an RCD and earth path are present.', hint: 'Build a circuit with an RCD and an earth conductor, then select Earth leakage.', check: () => $('#circuit-fault')?.value === 'earth-leakage' && validateCircuit() }
+];
 
 const $ = (selector, parent = document) => parent.querySelector(selector);
 const $$ = (selector, parent = document) => [...parent.querySelectorAll(selector)];
@@ -611,6 +616,9 @@ function checkCircuitLogic() {
   $('#sim-status').textContent = fault === 'open' ? 'Fault: open circuit' : fault === 'short' ? 'Fault: short circuit' : fault === 'earth-leakage' ? 'Fault: earth leakage' : isSimulating ? 'Simulation running' : 'Simulation stopped';
   const faultVoltage = leakage ? (source.dataset.type === 'battery' ? 12 : 230) : voltage;
   $('#sim-v').textContent = faultVoltage; $('#sim-i').textContent = current.toFixed(fault === 'earth-leakage' ? 2 : 1); $('#sim-p').textContent = (faultVoltage * current).toFixed(0);
+  const phaseCounts = Object.fromEntries(phaseConductors.map(conductor => [conductor, circuitConnections.filter(connection => connection.conductor === conductor).length]));
+  const activePhase = Object.entries(phaseCounts).sort((a, b) => b[1] - a[1])[0]?.[0] || 'line';
+  $('#sim-phase-current').textContent = `${activePhase.replace('phase-', 'Phase ').toUpperCase()} ${current.toFixed(2)} A`;
   loads.forEach(load => load.dataset.powered = powered ? 'true' : 'false');
   $('#circuit-message').textContent = fault === 'open' ? 'Open-circuit fault injected; no load current should flow.' : fault === 'short' ? 'Short-circuit fault injected; protective devices should be reviewed.' : fault === 'earth-leakage' ? 'Earth-leakage fault injected; verify RCD protection.' : $('#circuit-message').textContent;
 }
@@ -624,6 +632,54 @@ function renderComponentCatalog() {
 
 function renderTroubleshooting() {
   $('#troubleshooting-results').innerHTML = troubleshootingScenarios.map((scenario, index) => `<article class="scenario-card"><h3>${scenario.title}</h3><p>${scenario.symptom}</p><div class="scenario-options">${scenario.options.map((option, optionIndex) => `<button class="scenario-option" data-scenario="${index}" data-answer="${optionIndex}">${option}</button>`).join('')}</div><p class="scenario-feedback" id="scenario-feedback-${index}"></p></article>`).join('');
+}
+
+function getLessonProgress() {
+  try {
+    const value = JSON.parse(localStorage.getItem('dangote-academy-lessons') || '{}');
+    return value && typeof value === 'object' ? value : {};
+  } catch {
+    return {};
+  }
+}
+
+function renderLessons() {
+  const progress = getLessonProgress();
+  $('#lesson-results').innerHTML = guidedLessons.map(lesson => {
+    const completed = Boolean(progress[lesson.id]);
+    return `<article class="lesson-card ${completed ? 'completed' : ''}"><div><span class="eyebrow">Exercise</span><h3>${escapeHtml(lesson.title)}</h3><p>${escapeHtml(lesson.objective)}</p><small><strong>Hint:</strong> ${escapeHtml(lesson.hint)}</small></div><button class="secondary-button lesson-check" data-lesson="${lesson.id}">${completed ? 'Completed' : 'Check exercise'}</button></article>`;
+  }).join('');
+  $('#lesson-score').textContent = guidedLessons.filter(lesson => progress[lesson.id]).length;
+}
+
+function checkLesson(id) {
+  const lesson = guidedLessons.find(item => item.id === id);
+  if (!lesson) return;
+  if (!lesson.check()) {
+    showToast('Exercise not complete yet. Review the hint and try again.');
+    return;
+  }
+  const progress = getLessonProgress();
+  progress[id] = { completedAt: new Date().toISOString() };
+  localStorage.setItem('dangote-academy-lessons', JSON.stringify(progress));
+  renderLessons();
+  showToast('Exercise completed and saved offline.');
+}
+
+function exportReview() {
+  const review = {
+    exportedAt: new Date().toISOString(),
+    lessons: getLessonProgress(),
+    troubleshootingScore: Number($('#troubleshooting-score').textContent),
+    project: $('#project-name')?.value || '',
+    circuit: serialiseCircuit()
+  };
+  const blob = new Blob([JSON.stringify(review, null, 2)], { type: 'application/json' });
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(blob);
+  link.download = 'dangote-training-review.json';
+  link.click();
+  URL.revokeObjectURL(link.href);
 }
 
 function answerTroubleshooting(event) {
@@ -654,6 +710,7 @@ function initialise() {
   restoreProjectsFromDatabase();
   renderComponentCatalog();
   renderTroubleshooting();
+  renderLessons();
   $$('.nav-item').forEach(item => item.addEventListener('click', () => switchModule(item.dataset.module)));
   $$('[data-go]').forEach(item => item.addEventListener('click', () => switchModule(item.dataset.go)));
   $('#menu-toggle').addEventListener('click', () => $('#sidebar').classList.toggle('open'));
@@ -666,6 +723,8 @@ function initialise() {
   $('#component-search').addEventListener('input', renderComponentCatalog); $('#component-category').addEventListener('change', renderComponentCatalog);
   $('#calculate-schedule').addEventListener('click', calculateSchedule); $('#schedule-phase').addEventListener('change', calculateSchedule); $('#schedule-method').addEventListener('change', calculateSchedule); $('#schedule-rcd').addEventListener('change', calculateSchedule); $('#add-load-row').addEventListener('click', () => { addScheduleRow(); calculateSchedule(); }); $('#schedule-body').addEventListener('input', calculateSchedule); $('#schedule-body').addEventListener('click', event => { if (event.target.closest('.delete-schedule-row')) { event.target.closest('tr').remove(); calculateSchedule(); } });
   $('#troubleshooting-results').addEventListener('click', answerTroubleshooting);
+  $('#lesson-results').addEventListener('click', event => { const button = event.target.closest('.lesson-check'); if (button) checkLesson(button.dataset.lesson); });
+  $('#export-review').addEventListener('click', exportReview);
   $$('[data-library-message]').forEach(button => button.addEventListener('click', () => showToast(button.dataset.libraryMessage)));
   $('#upload-video').addEventListener('click', () => showToast('Video upload is queued for the next module release.'));
   $$('.component-drag').forEach(item => item.addEventListener('dragstart', event => event.dataTransfer.setData('type', item.dataset.type)));
