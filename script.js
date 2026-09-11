@@ -6,8 +6,9 @@ const moduleTitles = {
   boq: 'Bill of quantities',
   'circuit-builder': 'Interactive circuit builder',
   troubleshooting: 'Fault troubleshooting simulator',
-  library: 'Datasheet library'
-  , review: 'Instructor review'
+  library: 'Datasheet library',
+  review: 'Instructor review',
+  profile: 'Offline profile'
 };
 
 let lastCalculation = null;
@@ -40,7 +41,9 @@ const componentCatalog = [
 const troubleshootingScenarios = [
   { title: 'Motor starter will not run', symptom: 'The supply is present, but the contactor does not pull in when the start button is pressed.', options: ['Check the control fuse and overload contact', 'Replace the motor bearings', 'Increase the motor cable size'], answer: 0 },
   { title: 'Lamp trips the MCB', symptom: 'A lighting circuit trips immediately when a lamp is switched on.', options: ['Inspect for a short circuit in the lamp holder', 'Reduce the diversity factor', 'Change the neutral wire colour'], answer: 0 },
-  { title: 'RCD trips during testing', symptom: 'The RCD trips when a portable appliance is connected to an outlet.', options: ['Check the appliance insulation and earth leakage', 'Install a larger MCB', 'Remove the circuit earth conductor'], answer: 0 }
+  { title: 'RCD trips during testing', symptom: 'The RCD trips when a portable appliance is connected to an outlet.', options: ['Check the appliance insulation and earth leakage', 'Install a larger MCB', 'Remove the circuit earth conductor'], answer: 0 },
+  { title: 'Timer does not start the load', symptom: 'The timer display advances, but the controlled lamp remains off after the delay.', options: ['Check timer supply, output contact, and delay setting', 'Increase the lamp wattage', 'Remove the protective earth'], answer: 0 },
+  { title: 'Relay chatters repeatedly', symptom: 'A control relay rapidly makes and breaks instead of holding in.', options: ['Check coil voltage, control wiring, and contact feedback', 'Fit a smaller cable', 'Bypass the MCB'], answer: 0 }
 ];
 const guidedLessons = [
   { id: 'safe-topology', title: 'Build a protected lighting circuit', objective: 'Create a valid source → MCB → lamp circuit using a phase conductor.', hint: 'Use AC mains, MCB, and Lamp, then connect both wires as line or Phase A/B/C.', check: () => validateCircuit() },
@@ -420,10 +423,10 @@ function exportPdf() {
 function createComponent(type, x, y) {
   if (!restoringCircuit) pushCircuitHistory();
   const id = `component-${componentId++}`;
-  const labels = { 'source-ac': ['AC mains', '∿'], battery: ['Battery', '＋'], mcb: ['MCB', 'M'], rcd: ['RCD', 'R'], 'switch-1way': ['Switch', '╱'], junction: ['Junction', '＋'], lamp: ['Lamp', '◉'], socket: ['Socket', 'S'], motor: ['Motor', 'M'] };
+  const labels = { 'source-ac': ['AC mains', '∿'], battery: ['Battery', '＋'], mcb: ['MCB', 'M'], rcd: ['RCD', 'R'], 'switch-1way': ['Switch', '╱'], timer: ['Timer', 'T'], relay: ['Relay', 'K'], junction: ['Junction', '＋'], lamp: ['Lamp', '◉'], socket: ['Socket', 'S'], motor: ['Motor', 'M'] };
   const [label, symbol] = labels[type] || [type, '?'];
   const element = document.createElement('div');
-  element.className = 'circuit-component'; element.id = id; element.dataset.type = type; element.dataset.state = ['mcb', 'rcd'].includes(type) ? 'on' : 'off'; element.draggable = true; element.style.left = `${Math.max(0, x)}px`; element.style.top = `${Math.max(0, y)}px`;
+  element.className = 'circuit-component'; element.id = id; element.dataset.type = type; element.dataset.state = ['mcb', 'rcd'].includes(type) ? 'on' : 'off'; element.dataset.timerSeconds = type === 'timer' ? '5' : ''; element.draggable = true; element.style.left = `${Math.max(0, x)}px`; element.style.top = `${Math.max(0, y)}px`;
   const extraTerminal = type === 'junction'
     ? '<button class="circuit-terminal terminal-branch-a" data-terminal="branch-a" aria-label="Junction branch A terminal"></button><button class="circuit-terminal terminal-branch-b" data-terminal="branch-b" aria-label="Junction branch B terminal"></button>'
     : '';
@@ -434,7 +437,7 @@ function createComponent(type, x, y) {
     const terminal = event.target.closest('.circuit-terminal');
     if (terminal && connectMode) { selectConnectionEndpoint(id, terminal.dataset.terminal); return; }
     if (connectMode) { selectConnectionEndpoint(id); return; }
-    if (['switch-1way', 'mcb', 'rcd'].includes(type)) { element.dataset.state = element.dataset.state === 'on' ? 'off' : 'on'; checkCircuitLogic(); }
+    if (['switch-1way', 'mcb', 'rcd', 'relay'].includes(type)) { element.dataset.state = element.dataset.state === 'on' ? 'off' : 'on'; checkCircuitLogic(); }
   });
   $('#circuit-canvas').appendChild(element);
   $('#canvas-instruction')?.remove();
@@ -591,7 +594,7 @@ function validateCircuit() {
 function serialiseCircuit() {
   return {
     version: 2,
-    components: $$('.circuit-component').map(item => ({ id: item.id, type: item.dataset.type, state: item.dataset.state, left: parseInt(item.style.left, 10), top: parseInt(item.style.top, 10) })),
+    components: $$('.circuit-component').map(item => ({ id: item.id, type: item.dataset.type, state: item.dataset.state, timerSeconds: item.dataset.type === 'timer' ? Number(item.dataset.timerSeconds || 5) : undefined, left: parseInt(item.style.left, 10), top: parseInt(item.style.top, 10) })),
     connections: circuitConnections.map(connection => ({ ...connection }))
   };
 }
@@ -604,7 +607,12 @@ function restoreCircuit(data) {
   circuitConnections = [];
   const ids = data.components.map(item => createComponent(item.type, item.left, item.top));
   const idMap = new Map(data.components.map((item, index) => [item.id, ids[index]]));
-  data.components.forEach((item, index) => { const element = $(`#${ids[index]}`); if (element) element.dataset.state = item.state || element.dataset.state; });
+  data.components.forEach((item, index) => {
+    const element = $(`#${ids[index]}`);
+    if (!element) return;
+    element.dataset.state = item.state || element.dataset.state;
+    if (item.type === 'timer' && Number.isFinite(Number(item.timerSeconds))) element.dataset.timerSeconds = String(Math.max(0, Number(item.timerSeconds)));
+  });
   data.connections.forEach(connection => {
     if (idMap.has(connection.from) && idMap.has(connection.to)) {
       circuitConnections.push({ from: idMap.get(connection.from), fromTerminal: connection.fromTerminal || 'out', to: idMap.get(connection.to), toTerminal: connection.toTerminal || 'in', conductor: connection.conductor || 'line' });
@@ -646,7 +654,7 @@ function checkCircuitLogic() {
   if (!isSimulating) return;
   const valid = validateCircuit();
   const components = $$('.circuit-component'); const source = components.find(item => ['source-ac', 'battery'].includes(item.dataset.type)); const loads = components.filter(item => ['lamp', 'socket', 'motor'].includes(item.dataset.type));
-  const closed = components.filter(item => ['switch-1way', 'mcb', 'rcd'].includes(item.dataset.type)).every(item => item.dataset.state === 'on');
+  const closed = components.filter(item => ['switch-1way', 'mcb', 'rcd', 'relay', 'timer'].includes(item.dataset.type)).every(item => item.dataset.state === 'on');
   const fault = $('#circuit-fault')?.value || circuitFault;
   const leakage = fault === 'earth-leakage' && valid;
   const powered = valid && closed && fault === 'none';
@@ -737,7 +745,7 @@ function answerTroubleshooting(event) {
 function toggleSimulation() {
   isSimulating = !isSimulating;
   const button = $('#simulate-circuit'); const indicator = $('#sim-indicator');
-  if (isSimulating) { button.innerHTML = '<i class="fa-solid fa-stop"></i> Stop simulation'; button.className = 'secondary-button'; $('#sim-status').textContent = 'Simulation running'; indicator.className = 'fa-solid fa-circle running'; simulationTimer = setInterval(() => { simulationSeconds += 1; $('#sim-energy').textContent = `${((Number($('#sim-p').textContent) * simulationSeconds) / 3600000).toFixed(2)} kWh`; }, 1000); checkCircuitLogic(); }
+  if (isSimulating) { button.innerHTML = '<i class="fa-solid fa-stop"></i> Stop simulation'; button.className = 'secondary-button'; $('#sim-status').textContent = 'Simulation running'; indicator.className = 'fa-solid fa-circle running'; simulationTimer = setInterval(() => { simulationSeconds += 1; $$('.circuit-component[data-type="timer"]').forEach(timer => { timer.dataset.timerSeconds = String(Number(timer.dataset.timerSeconds || 5) - 1); if (Number(timer.dataset.timerSeconds) <= 0) timer.dataset.state = 'on'; }); $('#sim-energy').textContent = `${((Number($('#sim-p').textContent) * simulationSeconds) / 3600000).toFixed(2)} kWh`; checkCircuitLogic(); }, 1000); checkCircuitLogic(); }
   else { clearInterval(simulationTimer); button.innerHTML = '<i class="fa-solid fa-play"></i> Run simulation'; button.className = 'success-button'; $('#sim-status').textContent = 'Simulation stopped'; indicator.className = 'fa-solid fa-circle stopped'; $('#sim-v').textContent = '0'; $('#sim-i').textContent = '0'; $('#sim-p').textContent = '0'; $$('.circuit-component').forEach(item => item.dataset.powered = 'false'); }
 }
 

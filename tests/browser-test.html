@@ -8,8 +8,8 @@
 <body>
   <h1>Browser tests</h1>
   <ul id="results"></ul>
-  <script src="../core.js?v=20260911-0811"></script>
-  <iframe id="app" src="../index.html?v=20260911-0811" hidden title="application under test"></iframe>
+  <script src="../core.js?v=20260911-0817"></script>
+  <iframe id="app" src="../index.html?v=20260911-0817" hidden title="application under test"></iframe>
   <script>
     const results = document.querySelector('#results');
     const tests = [
@@ -146,8 +146,9 @@
         app.document.querySelector('#project-name').value = 'Browser project';
         app.saveNamedProject();
         const saved = JSON.parse(app.localStorage.getItem('dangote-academy-projects'));
-        return saved[0].name === 'Browser project' && saved[0].circuit.version === 2 &&
-          saved[0].circuit.connections[0].conductor === 'phase-c' && Array.isArray(saved[0].revisions);
+        const savedProject = saved.find(project => project.name === 'Browser project');
+        return savedProject && savedProject.circuit.version === 2 &&
+          savedProject.circuit.connections[0].conductor === 'phase-c' && Array.isArray(savedProject.revisions);
       }],
       ['guided lessons record completed progress', () => {
         const app = testApp();
@@ -174,6 +175,23 @@
         const projects = JSON.parse(app.localStorage.getItem('dangote-academy-projects'));
         const reviewed = projects.find(project => project.name === 'Review project');
         return profile.name === 'Ada Student' && profile.role === 'student' && reviewed.status === 'approved';
+      }],
+      ['timer and relay components support control states', () => {
+        const app = testApp();
+        const before = app.document.querySelectorAll('.circuit-component').length;
+        app.createComponent('timer', 20, 20);
+        app.createComponent('relay', 140, 20);
+        const controls = [...app.document.querySelectorAll('.circuit-component')].slice(before);
+        const [timer, relay] = controls;
+        const initial = timer && relay && timer.dataset.state === 'off' && relay.dataset.state === 'off';
+        relay.dispatchEvent(new app.MouseEvent('click', { bubbles: true }));
+        const toggled = relay.dataset.state === 'on';
+        const saved = app.serialiseCircuit().components.some(component => component.type === 'timer');
+        return initial && toggled && saved;
+      }],
+      ['troubleshooting includes timer and relay diagnostics', () => {
+        const app = testApp();
+        return app.document.querySelectorAll('.scenario-card').length === 5;
       }]
     ];
 
