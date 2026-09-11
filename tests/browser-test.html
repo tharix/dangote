@@ -8,8 +8,8 @@
 <body>
   <h1>Browser tests</h1>
   <ul id="results"></ul>
-  <script src="../core.js?v=20260910-1801"></script>
-  <iframe id="app" src="../index.html?v=20260910-1801" hidden title="application under test"></iframe>
+  <script src="../core.js?v=20260911-0811"></script>
+  <iframe id="app" src="../index.html?v=20260911-0811" hidden title="application under test"></iframe>
   <script>
     const results = document.querySelector('#results');
     const tests = [
@@ -157,6 +157,23 @@
         app.checkLesson('safe-topology');
         const progress = JSON.parse(app.localStorage.getItem('dangote-academy-lessons'));
         return Boolean(progress['safe-topology']) && app.document.querySelector('#lesson-score').textContent === '1';
+      }],
+      ['profiles and instructor review status persist offline', () => {
+        const app = testApp();
+        app.document.querySelector('#profile-name').value = 'Ada Student';
+        app.document.querySelector('#profile-student-id').value = 'ST-001';
+        app.document.querySelector('#profile-role').value = 'student';
+        app.saveProfile();
+        loadCircuit(app, ['source-ac', 'mcb', 'lamp'], [
+          connection('source', 'mcb', 'line'), connection('mcb', 'lamp', 'line')
+        ]);
+        app.document.querySelector('#project-name').value = 'Review project';
+        app.saveNamedProject();
+        app.updateProjectReviewStatus('Review project', 'approved');
+        const profile = JSON.parse(app.localStorage.getItem('dangote-academy-profile'));
+        const projects = JSON.parse(app.localStorage.getItem('dangote-academy-projects'));
+        const reviewed = projects.find(project => project.name === 'Review project');
+        return profile.name === 'Ada Student' && profile.role === 'student' && reviewed.status === 'approved';
       }]
     ];
 

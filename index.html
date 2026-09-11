@@ -13,8 +13,8 @@
   <script src="assets/vendor/jspdf/jspdf.umd.min.js" defer></script>
   <script src="assets/vendor/jspdf/jspdf.plugin.autotable.min.js" defer></script>
   <script src="supabase-config.js" defer></script>
-  <script src="core.js?v=20260910-1801" defer></script>
-  <script src="script.js?v=20260910-1801" defer></script>
+  <script src="core.js?v=20260911-0811" defer></script>
+  <script src="script.js?v=20260911-0811" defer></script>
 </head>
 <body>
   <a class="skip-link" href="#main-content">Skip to main content</a>
@@ -36,11 +36,13 @@
         <button class="nav-item" data-module="circuit-builder"><i class="fa-solid fa-network-wired"></i><span>Circuit Builder</span></button>
         <button class="nav-item" data-module="troubleshooting"><i class="fa-solid fa-screwdriver-wrench"></i><span>Troubleshooting</span></button>
         <button class="nav-item" data-module="lessons"><i class="fa-solid fa-graduation-cap"></i><span>Lessons</span></button>
+        <button class="nav-item" data-module="review"><i class="fa-solid fa-clipboard-check"></i><span>Instructor Review</span></button>
+        <button class="nav-item" data-module="profile"><i class="fa-solid fa-user"></i><span>Profile</span></button>
         <p class="nav-label">Resources</p>
         <button class="nav-item" data-module="library"><i class="fa-solid fa-book-open"></i><span>Datasheet Library</span></button>
       </nav>
       <div class="profile">
-        <div class="avatar">A</div><div><strong>Engr. Ahmed</strong><small>Instructor role</small></div>
+        <div class="avatar">A</div><div><strong id="profile-name-display">Engr. Ahmed</strong><small id="profile-role-display">Instructor role</small></div>
         <button class="icon-button" aria-label="Sign out"><i class="fa-solid fa-arrow-right-from-bracket"></i></button>
       </div>
     </aside>
@@ -87,6 +89,8 @@
         <section class="module" id="module-components"><div class="section-heading"><div><p class="eyebrow accent">Engineering tools</p><h2>Component selection wizard</h2><p class="muted">Filter common electrical components by application and rating.</p></div></div><div class="selector-toolbar"><label class="search-field"><i class="fa-solid fa-magnifying-glass"></i><input id="component-search" type="search" placeholder="Search components" aria-label="Search components"></label><select id="component-category" aria-label="Filter components"><option value="all">All categories</option><option value="protection">Protection</option><option value="control">Control</option><option value="cabling">Cabling</option><option value="lighting">Lighting</option></select></div><div class="component-grid" id="component-results"></div></section>
         <section class="module" id="module-troubleshooting"><div class="section-heading"><div><p class="eyebrow accent">Simulation lab</p><h2>Fault troubleshooting simulator</h2><p class="muted">Choose a scenario, inspect the symptoms, and identify the likely fault.</p></div><span class="score-pill">Score <b id="troubleshooting-score">0</b>/3</span></div><div class="troubleshooting-grid" id="troubleshooting-results"></div></section>
         <section class="module" id="module-lessons"><div class="section-heading"><div><p class="eyebrow accent">Guided learning</p><h2>Practical circuit lessons</h2><p class="muted">Complete each exercise, review the hint, and export your progress for instructor review.</p></div><div class="button-row"><span class="score-pill">Progress <b id="lesson-score">0</b>/3</span><button class="secondary-button" id="export-review">Export review</button></div></div><div class="lesson-grid" id="lesson-results"></div></section>
+        <section class="module" id="module-review"><div class="section-heading"><div><p class="eyebrow accent">Team workflow</p><h2>Instructor review</h2><p class="muted">Review offline project submissions and record feedback status.</p></div><span class="demo-note" id="review-summary">0 saved projects</span></div><div class="review-grid" id="review-projects"></div></section>
+        <section class="module" id="module-profile"><div class="section-heading"><div><p class="eyebrow accent">Workspace identity</p><h2>Offline profile</h2><p class="muted">Set the learner or instructor identity attached to local submissions.</p></div></div><article class="panel form-panel profile-form"><label>Name<input id="profile-name" maxlength="80"></label><label>Student ID<input id="profile-student-id" maxlength="40"></label><label>Role<select id="profile-role"><option value="student">Student</option><option value="instructor">Instructor</option><option value="administrator">Administrator</option></select></label><button class="primary-button" id="save-profile">Save profile</button></article></section>
         <section class="module" id="module-library"><div class="section-heading"><div><p class="eyebrow accent">Resources</p><h2>Datasheet library</h2><p class="muted">Quick reference material for classroom demonstrations.</p></div></div><div class="library-grid"><article class="resource-card"><i class="fa-solid fa-shield-halved"></i><div><strong>Protection selection guide</strong><p>Use the calculator output as a starting point for MCB demonstrations.</p><button class="text-button" data-library-message="Protection selection guide opened">Open reference <i class="fa-solid fa-arrow-right"></i></button></div></article><article class="resource-card"><i class="fa-solid fa-cable-car"></i><div><strong>Cable installation notes</strong><p>Review the demonstration derating methods used by the academy tools.</p><button class="text-button" data-library-message="Cable installation notes opened">Open reference <i class="fa-solid fa-arrow-right"></i></button></div></article><article class="resource-card"><i class="fa-solid fa-lightbulb"></i><div><strong>Lighting circuit basics</strong><p>Practice identifying sources, switches, loads, and protective devices.</p><button class="text-button" data-library-message="Lighting circuit basics opened">Open reference <i class="fa-solid fa-arrow-right"></i></button></div></article></div></section>
       </div>
     </main>

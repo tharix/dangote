@@ -7,6 +7,7 @@ const moduleTitles = {
   'circuit-builder': 'Interactive circuit builder',
   troubleshooting: 'Fault troubleshooting simulator',
   library: 'Datasheet library'
+  , review: 'Instructor review'
 };
 
 let lastCalculation = null;
@@ -46,6 +47,7 @@ const guidedLessons = [
   { id: 'balanced-phases', title: 'Balance a three-phase schedule', objective: 'Assign equal diversified loads to Phase A, Phase B, and Phase C.', hint: 'Open Load Schedule, choose three-phase, and use equal loads on each phase.', check: () => Number($('#schedule-phase')?.value) === 3 && ['phase-a', 'phase-b', 'phase-c'].every(phase => $$('.schedule-row-phase').some(select => select.value === phase)) },
   { id: 'fault-response', title: 'Diagnose an earth-leakage fault', objective: 'Enable earth leakage and verify that an RCD and earth path are present.', hint: 'Build a circuit with an RCD and an earth conductor, then select Earth leakage.', check: () => $('#circuit-fault')?.value === 'earth-leakage' && validateCircuit() }
 ];
+const profileStorageKey = 'dangote-academy-profile';
 
 const $ = (selector, parent = document) => parent.querySelector(selector);
 const $$ = (selector, parent = document) => [...parent.querySelectorAll(selector)];
@@ -66,6 +68,42 @@ function switchModule(moduleId) {
   $$('.module').forEach(module => module.classList.toggle('active', module.id === `module-${moduleId}`));
   $('#module-title').textContent = moduleTitles[moduleId] || moduleTitles.dashboard;
   $('#sidebar').classList.remove('open');
+}
+
+function getProfile() {
+  try {
+    const profile = JSON.parse(localStorage.getItem(profileStorageKey) || 'null');
+    return profile && typeof profile === 'object' ? profile : { name: 'Engr. Ahmed', studentId: '', role: 'instructor' };
+  } catch {
+    return { name: 'Engr. Ahmed', studentId: '', role: 'instructor' };
+  }
+}
+
+function saveProfile() {
+  const profile = {
+    name: $('#profile-name').value.trim() || 'Unnamed learner',
+    studentId: $('#profile-student-id').value.trim(),
+    role: $('#profile-role').value
+  };
+  localStorage.setItem(profileStorageKey, JSON.stringify(profile));
+  $('#profile-name-display').textContent = profile.name;
+  $('#profile-role-display').textContent = `${profile.role[0].toUpperCase()}${profile.role.slice(1)} role`;
+  showToast('Offline profile saved.');
+}
+
+function renderReview() {
+  const projects = getSavedProjects();
+  const progress = getLessonProgress();
+  $('#review-summary').textContent = `${projects.length} saved project${projects.length === 1 ? '' : 's'} · ${Object.keys(progress).length}/${guidedLessons.length} lessons complete`;
+  $('#review-projects').innerHTML = projects.length ? projects.map(project => `<article class="review-card"><div><strong>${escapeHtml(project.name)}</strong><small>Saved ${escapeHtml(new Date(project.savedAt).toLocaleString())}</small><span class="status ${project.status === 'approved' ? 'success' : project.status === 'changes-requested' ? 'danger' : 'info'}">${escapeHtml(project.status || 'draft')}</span></div><div class="button-row"><button class="secondary-button review-action" data-name="${escapeHtml(project.name)}" data-status="approved">Approve</button><button class="secondary-button review-action" data-name="${escapeHtml(project.name)}" data-status="changes-requested">Request changes</button></div></article>`).join('') : '<p class="muted">Save a project to review it here.</p>';
+}
+
+function updateProjectReviewStatus(name, status) {
+  const projects = getSavedProjects().map(project => project.name === name ? { ...project, status, reviewedAt: new Date().toISOString(), reviewer: getProfile().name } : project);
+  localStorage.setItem('dangote-academy-projects', JSON.stringify(projects));
+  persistProjects(projects);
+  renderReview();
+  showToast(`Project marked ${status}.`);
 }
 
 function insertLoadScheduleModule() {
@@ -229,6 +267,7 @@ async function restoreProjectsFromDatabase() {
         if (projects.length) {
           localStorage.setItem('dangote-academy-projects', JSON.stringify(projects));
           refreshProjectList();
+          renderReview();
         } else if (getSavedProjects().length) {
           persistProjects(getSavedProjects());
         }
@@ -267,6 +306,7 @@ function saveNamedProject() {
   const projects = getSavedProjects().filter(project => project.name !== name);
   const previous = getSavedProjects().find(project => project.name === name);
   const project = projectSnapshot(name);
+  project.status = previous?.status || 'draft';
   project.revisions = [...(previous?.revisions || []), {
     savedAt: previous?.savedAt || project.savedAt,
     rows: previous?.rows || project.rows,
@@ -702,6 +742,12 @@ function toggleSimulation() {
 }
 
 function initialise() {
+  const profile = getProfile();
+  $('#profile-name').value = profile.name;
+  $('#profile-student-id').value = profile.studentId || '';
+  $('#profile-role').value = profile.role;
+  $('#profile-name-display').textContent = profile.name;
+  $('#profile-role-display').textContent = `${profile.role[0].toUpperCase()}${profile.role.slice(1)} role`;
   $('#boq-date').textContent = new Date().toLocaleDateString('en-GB');
   insertLoadScheduleModule();
   restoreBOQ();
@@ -711,6 +757,7 @@ function initialise() {
   renderComponentCatalog();
   renderTroubleshooting();
   renderLessons();
+  renderReview();
   $$('.nav-item').forEach(item => item.addEventListener('click', () => switchModule(item.dataset.module)));
   $$('[data-go]').forEach(item => item.addEventListener('click', () => switchModule(item.dataset.go)));
   $('#menu-toggle').addEventListener('click', () => $('#sidebar').classList.toggle('open'));
@@ -725,6 +772,8 @@ function initialise() {
   $('#troubleshooting-results').addEventListener('click', answerTroubleshooting);
   $('#lesson-results').addEventListener('click', event => { const button = event.target.closest('.lesson-check'); if (button) checkLesson(button.dataset.lesson); });
   $('#export-review').addEventListener('click', exportReview);
+  $('#save-profile').addEventListener('click', saveProfile);
+  $('#review-projects').addEventListener('click', event => { const button = event.target.closest('.review-action'); if (button) updateProjectReviewStatus(button.dataset.name, button.dataset.status); });
   $$('[data-library-message]').forEach(button => button.addEventListener('click', () => showToast(button.dataset.libraryMessage)));
   $('#upload-video').addEventListener('click', () => showToast('Video upload is queued for the next module release.'));
   $$('.component-drag').forEach(item => item.addEventListener('dragstart', event => event.dataTransfer.setData('type', item.dataset.type)));

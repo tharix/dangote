@@ -54,6 +54,8 @@ Named projects contain the BOQ and circuit diagram together, with up to ten prev
 
 The Lessons module provides practical circuit exercises with hints, offline progress tracking, and a review JSON export for instructors. The circuit review also displays the dominant phase current for the active training topology. Cloud collaboration remains optional; no Supabase credentials are required for offline use.
 
+Offline profiles support student, instructor, and administrator roles. Saved projects can be reviewed locally, marked approved, or returned for changes; reviewer name and timestamps are stored with the project.
+
 ## Team workflow
 
 Use short branches and pull requests. Keep calculation logic in `core.js`, UI wiring in `script.js`, and update tests when engineering rules change. The repository assigns default review ownership through [CODEOWNERS](./.github/CODEOWNERS) and checks GitHub Actions updates with Dependabot. See [CONTRIBUTING.md](./CONTRIBUTING.md).
