@@ -25,10 +25,12 @@ let circuitHistory = [];
 let circuitRedo = [];
 let restoringCircuit = false;
 let lastScheduleResult = null;
+let projectsChangedDuringStartup = false;
 const phaseConductors = ['line', 'phase-a', 'phase-b', 'phase-c'];
 const conductorTypes = [...phaseConductors, 'neutral', 'earth'];
 const projectDatabaseName = 'dangote-academy-projects';
 const projectDatabaseVersion = 1;
+const browserTestMode = new URLSearchParams(window.location.search).get('browser-test') === '1';
 
 const componentCatalog = [
   { name: 'Miniature circuit breaker', category: 'protection', icon: 'fa-toggle-on', description: 'Protects final circuits from overload and short circuit conditions.', tags: ['Type C', '1-63 A'] },
@@ -38,6 +40,7 @@ const componentCatalog = [
   { name: 'LED bulkhead light', category: 'lighting', icon: 'fa-lightbulb', description: 'Efficient enclosed luminaire for industrial and service areas.', tags: ['18 W', 'IP65'] },
   { name: 'Emergency stop button', category: 'control', icon: 'fa-hand', description: 'Manual control device for quickly stopping hazardous machinery.', tags: ['Red', 'Twist reset'] }
 ];
+const circuitComponentTypes = ['source-ac', 'battery', 'mcb', 'rcd', 'switch-1way', 'timer', 'relay', 'junction', 'lamp', 'socket', 'motor'];
 
 const troubleshootingScenarios = [
   { title: 'Motor starter will not run', symptom: 'The supply is present, but the contactor does not pull in when the start button is pressed.', options: ['Check the control fuse and overload contact', 'Replace the motor bearings', 'Increase the motor cable size'], answer: 0 },
@@ -79,7 +82,12 @@ function switchModule(moduleId) {
 function getProfile() {
   try {
     const profile = JSON.parse(localStorage.getItem(profileStorageKey) || 'null');
-    return profile && typeof profile === 'object' ? profile : { name: 'Engr. Ahmed', studentId: '', role: 'instructor' };
+    if (!profile || typeof profile !== 'object' || Array.isArray(profile)) throw new Error('Invalid saved profile.');
+    return {
+      name: typeof profile.name === 'string' && profile.name.trim() ? profile.name.trim() : 'Engr. Ahmed',
+      studentId: typeof profile.studentId === 'string' ? profile.studentId : '',
+      role: ['student', 'instructor', 'administrator'].includes(profile.role) ? profile.role : 'student'
+    };
   } catch {
     return { name: 'Engr. Ahmed', studentId: '', role: 'instructor' };
   }
@@ -89,7 +97,9 @@ function saveProfile() {
   const profile = {
     name: $('#profile-name').value.trim() || 'Unnamed learner',
     studentId: $('#profile-student-id').value.trim(),
-    role: $('#profile-role').value
+    role: ['student', 'instructor', 'administrator'].includes($('#profile-role').value)
+      ? $('#profile-role').value
+      : 'student'
   };
   localStorage.setItem(profileStorageKey, JSON.stringify(profile));
   const profiles = getStoredProfiles().filter(item => profile.studentId
@@ -164,10 +174,80 @@ function getStudentProgressSummary() {
   };
 }
 
+function renderDashboard() {
+  const date = $('#dashboard-date');
+  const greeting = $('#dashboard-greeting');
+  const activity = $('#dashboard-activity');
+  if (!date || !greeting || !activity) return;
+
+  const now = new Date();
+  const hour = now.getHours();
+  const greetingPrefix = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
+  date.textContent = new Intl.DateTimeFormat('en-GB', {
+    weekday: 'long', day: 'numeric', month: 'long', year: 'numeric'
+  }).format(now);
+  greeting.textContent = `${greetingPrefix}, ${getProfile().name}.`;
+
+  const projects = getSavedProjects().filter(project =>
+    project && typeof project.name === 'string' && project.name.trim()
+  );
+  const lessons = getLessonProgress();
+  const troubleshooting = getTroubleshootingProgress();
+  const completedLessons = guidedLessons.filter(lesson => lessons[lesson.id]).length;
+  const completedScenarios = troubleshootingScenarios.filter((scenario, index) =>
+    troubleshooting[scenario.id || `scenario-${index}`]?.completed
+  ).length;
+
+  $('#dashboard-project-count').textContent = String(projects.length);
+  $('#dashboard-lesson-count').textContent = `${completedLessons} / ${guidedLessons.length}`;
+  $('#dashboard-scenario-count').textContent = `${completedScenarios} / ${troubleshootingScenarios.length}`;
+  $('#dashboard-boq-count').textContent = String($$('#boq-body tr').length);
+
+  const events = projects
+    .filter(project => Number.isFinite(Date.parse(project.savedAt)))
+    .map(project => ({
+      title: `Project saved: ${project.name}`,
+      detail: `Project · ${project.status || 'draft'}`,
+      at: project.savedAt,
+      icon: 'fa-folder-open',
+      color: 'blue-bg'
+    }));
+  guidedLessons.forEach(lesson => {
+    const at = lessons[lesson.id]?.completedAt;
+    if (Number.isFinite(Date.parse(at))) {
+      events.push({
+        title: `Lesson completed: ${lesson.title}`,
+        detail: 'Guided learning',
+        at,
+        icon: 'fa-graduation-cap',
+        color: 'violet-bg'
+      });
+    }
+  });
+  troubleshootingScenarios.forEach((scenario, index) => {
+    const progress = troubleshooting[scenario.id || `scenario-${index}`];
+    if (progress?.completed && Number.isFinite(Date.parse(progress.completedAt))) {
+      events.push({
+        title: `Scenario solved: ${scenario.title}`,
+        detail: `Troubleshooting · ${Number(progress.attempts) || 0} attempt${Number(progress.attempts) === 1 ? '' : 's'}`,
+        at: progress.completedAt,
+        icon: 'fa-screwdriver-wrench',
+        color: 'yellow-bg'
+      });
+    }
+  });
+
+  events.sort((left, right) => Date.parse(right.at) - Date.parse(left.at));
+  activity.innerHTML = events.length
+    ? events.slice(0, 5).map(event => `<div class="activity"><span class="activity-icon ${event.color}"><i class="fa-solid ${event.icon}"></i></span><div><strong>${escapeHtml(event.title)}</strong><small>${escapeHtml(event.detail)} · ${escapeHtml(new Date(event.at).toLocaleString())}</small></div></div>`).join('')
+    : '<p class="dashboard-empty">Your saved projects, completed lessons, and solved scenarios will appear here.</p>';
+}
+
 function renderStudentProgressSummary() {
   const summary = getStudentProgressSummary();
   const target = $('#student-progress-summary');
   if (target) target.innerHTML = `<span>Lessons <b>${summary.lessonsCompleted}/${summary.lessonsTotal}</b></span><span>Scenarios <b>${summary.scenariosCompleted}/${summary.scenariosTotal}</b></span><span>Attempts <b>${summary.attempts}</b></span><span>Submitted <b>${summary.projectsSubmitted}</b></span>`;
+  renderDashboard();
 }
 
 function renderReview() {
@@ -177,15 +257,28 @@ function renderReview() {
   $('#review-projects').innerHTML = projects.length ? projects.map(project => {
     const history = Array.isArray(project.reviewHistory) ? project.reviewHistory : [];
     const status = project.status || 'draft';
-    return `<article class="review-card" data-project="${escapeHtml(project.name)}"><div><strong>${escapeHtml(project.name)}</strong><small>Owner: ${escapeHtml(project.owner?.name || 'Local learner')} · Saved ${escapeHtml(new Date(project.savedAt).toLocaleString())}</small><span class="status ${status === 'approved' ? 'success' : status === 'changes-requested' ? 'danger' : status === 'submitted' ? 'info' : 'info'}">${escapeHtml(status)}</span><small>${project.resubmissionCount || 0} resubmission${project.resubmissionCount === 1 ? '' : 's'} · ${history.length} review event${history.length === 1 ? '' : 's'}</small>${project.comments ? `<p class="review-comment"><strong>Latest feedback:</strong> ${escapeHtml(project.comments)}</p>` : ''}<details><summary>Review history</summary><ul>${history.length ? history.map(event => `<li>${escapeHtml(event.action)} · ${escapeHtml(event.actor || 'Unknown')} · ${escapeHtml(new Date(event.at).toLocaleString())}${event.comment ? ` — ${escapeHtml(event.comment)}` : ''}</li>`).join('') : '<li>No history yet.</li>'}</ul></details></div><div class="review-actions"><textarea class="review-comment-input" data-name="${escapeHtml(project.name)}" maxlength="500" placeholder="Comment for the student">${escapeHtml(project.comments || '')}</textarea><div class="button-row" data-role="instructor,administrator"><button class="secondary-button review-action" data-name="${escapeHtml(project.name)}" data-status="approved">Approve</button><button class="secondary-button review-action" data-name="${escapeHtml(project.name)}" data-status="changes-requested">Request changes</button></div></div></article>`;
+    return `<article class="review-card" data-project="${escapeHtml(project.name)}"><div><strong>${escapeHtml(project.name)}</strong><small>Owner: ${escapeHtml(project.owner?.name || 'Local learner')} · Saved ${escapeHtml(new Date(project.savedAt).toLocaleString())}</small><span class="status ${status === 'approved' ? 'success' : status === 'changes-requested' ? 'danger' : status === 'submitted' ? 'info' : 'info'}">${escapeHtml(status)}</span><small>${project.resubmissionCount || 0} resubmission${project.resubmissionCount === 1 ? '' : 's'} · ${history.length} review event${history.length === 1 ? '' : 's'}</small>${project.comments ? `<p class="review-comment"><strong>Latest feedback:</strong> ${escapeHtml(project.comments)}</p>` : ''}<details><summary>Review history</summary><ul>${history.length ? history.map(event => `<li>${escapeHtml(event.action)} · ${escapeHtml(event.actor || 'Unknown')} · ${escapeHtml(new Date(event.at).toLocaleString())}${event.comment ? ` — ${escapeHtml(event.comment)}` : ''}</li>`).join('') : '<li>No history yet.</li>'}</ul></details></div><div class="review-actions"><textarea class="review-comment-input" data-role="instructor,administrator" data-name="${escapeHtml(project.name)}" maxlength="500" placeholder="Comment for the student" ${status !== 'submitted' ? 'disabled' : ''}>${escapeHtml(project.comments || '')}</textarea><div class="button-row" data-role="instructor,administrator"><button class="secondary-button review-action" data-name="${escapeHtml(project.name)}" data-status="approved" ${status !== 'submitted' ? 'disabled' : ''}>Approve</button><button class="secondary-button review-action" data-name="${escapeHtml(project.name)}" data-status="changes-requested" ${status !== 'submitted' ? 'disabled' : ''}>Request changes</button></div></div></article>`;
   }).join('') : '<p class="muted">Save a project to review it here.</p>';
   applyRoleControls();
   renderStudentProgressSummary();
 }
 
 function updateProjectReviewStatus(name, status) {
+  if (!canReviewProjects()) {
+    showToast('Only instructors and administrators can review projects.');
+    return false;
+  }
+  if (!['approved', 'changes-requested'].includes(status)) {
+    showToast('Choose a valid review status.');
+    return false;
+  }
+  const project = getSavedProjects().find(item => item.name === name);
+  if (!project || project.status !== 'submitted') {
+    showToast('Only submitted projects can be reviewed.');
+    return false;
+  }
   const commentInput = $$('.review-comment-input').find(input => input.dataset.name === name);
-  const comment = commentInput?.value.trim() || getSavedProjects().find(project => project.name === name)?.comments || '';
+  const comment = commentInput?.value.trim() || project.comments || '';
   const now = new Date().toISOString();
   const projects = getSavedProjects().map(project => {
     if (project.name !== name) return project;
@@ -193,25 +286,45 @@ function updateProjectReviewStatus(name, status) {
     return { ...project, status, comments: comment, reviewedAt: now, reviewer: getProfile().name, reviewHistory: [...history, { action: status === 'approved' ? 'Approved' : 'Requested changes', actor: getProfile().name, at: now, comment }] };
   });
   localStorage.setItem('dangote-academy-projects', JSON.stringify(projects));
+  projectsChangedDuringStartup = true;
   persistProjects(projects);
   renderReview();
   showToast(`Project marked ${status}.`);
+  return true;
 }
 
 function submitNamedProject() {
+  if (getRole() !== 'student') {
+    showToast('Only student profiles can submit projects.');
+    return false;
+  }
   const name = $('#project-name')?.value.trim();
   if (!name) {
     showToast('Enter a project name before submitting.');
-    return;
-  }
-
-  function submitProject() {
-    return submitNamedProject();
+    return false;
   }
   const project = getSavedProjects().find(item => item.name === name);
   if (!project) {
     showToast('Save the project before submitting it.');
-    return;
+    return false;
+  }
+  const activeSnapshot = projectSnapshot(name);
+  if (JSON.stringify(project.rows || []) !== JSON.stringify(activeSnapshot.rows) ||
+    JSON.stringify(project.circuit || {}) !== JSON.stringify(activeSnapshot.circuit) ||
+    JSON.stringify(project.schedule || null) !== JSON.stringify(activeSnapshot.schedule) ||
+    JSON.stringify(project.calculationInputs || null) !== JSON.stringify(activeSnapshot.calculationInputs)) {
+    showToast('Save the latest project changes before submitting.');
+    return false;
+  }
+  if (project.owner?.studentId
+    ? project.owner.studentId !== getProfile().studentId
+    : project.owner?.name && project.owner.name !== getProfile().name) {
+    showToast('You can only submit projects owned by your profile.');
+    return false;
+  }
+  if (['submitted', 'approved'].includes(project.status)) {
+    showToast('This project is already submitted or approved.');
+    return false;
   }
   const now = new Date().toISOString();
   const resubmission = project.status === 'changes-requested';
@@ -224,10 +337,12 @@ function submitNamedProject() {
     reviewHistory: [...(Array.isArray(item.reviewHistory) ? item.reviewHistory : []), { action: resubmission ? 'Resubmitted' : 'Submitted', actor: getProfile().name, at: now }]
   } : item);
   localStorage.setItem('dangote-academy-projects', JSON.stringify(updated));
+  projectsChangedDuringStartup = true;
   persistProjects(updated);
   renderReview();
   renderStudentProgressSummary();
   showToast(resubmission ? 'Project resubmitted for instructor review.' : 'Project submitted for instructor review.');
+  return true;
 }
 
 function renderAdminTools() {
@@ -247,10 +362,125 @@ function insertLoadScheduleModule() {
   [['Lighting circuit', 1.2, 1, .95, .8], ['Socket outlets', 3, 1, .9, .6], ['Small motor', 4, 1, .82, .7]].forEach(row => addScheduleRow(...row));
 }
 
-function addScheduleRow(name = 'New circuit', load = 1, quantity = 1, pf = .9, diversity = .8) {
+function addScheduleRow(name = 'New circuit', load = 1, quantity = 1, pf = .9, diversity = .8, phase = 'phase-a') {
   const row = document.createElement('tr');
   row.innerHTML = `<td><input class="schedule-name" value="${escapeHtml(name)}" maxlength="60"></td><td><input class="schedule-load" type="number" value="${escapeHtml(load)}" min="0" step="0.1"></td><td><input class="schedule-qty" type="number" value="${escapeHtml(quantity)}" min="1" step="1"></td><td><input class="schedule-pf" type="number" value="${escapeHtml(pf)}" min="0.01" max="1" step="0.01"></td><td><input class="schedule-diversity" type="number" value="${escapeHtml(diversity)}" min="0.01" max="1" step="0.01"></td><td><select class="schedule-row-phase" aria-label="Circuit phase"><option value="phase-a">Phase A</option><option value="phase-b">Phase B</option><option value="phase-c">Phase C</option></select></td><td><button class="delete-schedule-row" aria-label="Delete circuit"><i class="fa-solid fa-trash"></i></button></td>`;
   $('#schedule-body').appendChild(row);
+  $('.schedule-row-phase', row).value = phase;
+}
+
+function getLoadScheduleSnapshot() {
+  return {
+    phase: Number($('#schedule-phase').value),
+    method: $('#schedule-method').value,
+    rcd: $('#schedule-rcd').value,
+    rows: $$('#schedule-body tr').map(row => ({
+      name: $('.schedule-name', row).value,
+      load: $('.schedule-load', row).value,
+      quantity: $('.schedule-qty', row).value,
+      pf: $('.schedule-pf', row).value,
+      diversity: $('.schedule-diversity', row).value,
+      phase: $('.schedule-row-phase', row).value
+    }))
+  };
+}
+
+function getLoadSizingInputs() {
+  return {
+    phase: $('#calc-phase').value,
+    loadType: $('#calc-load-type').value,
+    loadValue: $('#calc-load-value').value,
+    pf: $('#calc-pf').value,
+    diversity: $('#calc-diversity').value,
+    cableLength: $('#calc-length').value,
+    ambientFactor: $('#calc-ambient').value,
+    groupingFactor: $('#calc-grouping').value,
+    installMethod: $('#calc-install-method').value
+  };
+}
+
+function isValidLoadSizingInputs(inputs) {
+  const numericDraft = value => (typeof value === 'number' && Number.isFinite(value)) ||
+    (typeof value === 'string' && value.length <= 32 && (value === '' || Number.isFinite(Number(value))));
+  return Boolean(inputs && typeof inputs === 'object' && !Array.isArray(inputs) &&
+    [1, 3].includes(Number(inputs.phase)) && ['kw', 'hp', 'amps'].includes(inputs.loadType) &&
+    ['clipped', 'conduit', 'tray', 'ground'].includes(inputs.installMethod) &&
+    [1, .94, .87].includes(Number(inputs.ambientFactor)) &&
+    [1, .8, .7].includes(Number(inputs.groupingFactor)) &&
+    ['loadValue', 'pf', 'diversity', 'cableLength'].every(key => numericDraft(inputs[key])));
+}
+
+function invalidateLoadSizingResult() {
+  lastCalculation = null;
+  if ($('#add-to-boq')) $('#add-to-boq').disabled = true;
+  if ($('#res-capacity-warning')) {
+    $('#res-capacity-warning').textContent = 'Inputs changed; recalculate before using this result.';
+    $('#res-capacity-warning').className = 'warning';
+  }
+}
+
+function restoreLoadSizingInputs(inputs) {
+  if (!isValidLoadSizingInputs(inputs)) throw new Error('Invalid load sizing inputs.');
+  $('#calc-phase').value = String(inputs.phase);
+  $('#calc-load-type').value = inputs.loadType;
+  $('#calc-load-value').value = inputs.loadValue;
+  $('#calc-pf').value = inputs.pf;
+  $('#calc-diversity').value = inputs.diversity;
+  $('#calc-length').value = inputs.cableLength;
+  $('#calc-ambient').value = ['1', '.94', '.87'].find(value => Number(value) === Number(inputs.ambientFactor));
+  $('#calc-grouping').value = ['1', '.8', '.7'].find(value => Number(value) === Number(inputs.groupingFactor));
+  $('#calc-install-method').value = inputs.installMethod;
+  calculateLoad({ preventDefault() {} });
+}
+
+function isValidLoadScheduleSnapshot(schedule) {
+  const numericDraft = value => (typeof value === 'number' && Number.isFinite(value)) ||
+    (typeof value === 'string' && value.length <= 32 && (value === '' || Number.isFinite(Number(value))));
+  return Boolean(schedule && typeof schedule === 'object' && !Array.isArray(schedule) &&
+    [1, 3].includes(schedule.phase) &&
+    ['clipped', 'conduit', 'tray', 'ground'].includes(schedule.method) &&
+    ['recommended', 'not-required'].includes(schedule.rcd) &&
+    Array.isArray(schedule.rows) && schedule.rows.length <= 500 &&
+    schedule.rows.every(row => row && typeof row.name === 'string' && row.name.length <= 60 &&
+      numericDraft(row.load) && numericDraft(row.quantity) &&
+      numericDraft(row.pf) && numericDraft(row.diversity) &&
+      ['phase-a', 'phase-b', 'phase-c'].includes(row.phase)));
+}
+
+function restoreLoadSchedule(schedule) {
+  if (!isValidLoadScheduleSnapshot(schedule)) throw new Error('Invalid load schedule.');
+  $('#schedule-phase').value = String(schedule.phase);
+  $('#schedule-method').value = schedule.method;
+  $('#schedule-rcd').value = schedule.rcd;
+  $('#schedule-body').innerHTML = '';
+  schedule.rows.forEach(row => addScheduleRow(
+    row.name, row.load, row.quantity, row.pf, row.diversity, row.phase
+  ));
+  if (schedule.rows.length) calculateSchedule();
+  else clearScheduleResults();
+}
+
+function resetLoadSchedule() {
+  $('#schedule-phase').value = '1';
+  $('#schedule-method').value = 'clipped';
+  $('#schedule-rcd').value = 'recommended';
+  $('#schedule-body').innerHTML = '';
+  clearScheduleResults();
+}
+
+function clearScheduleResults() {
+  lastScheduleResult = null;
+  $('#schedule-connected').textContent = '--';
+  $('#schedule-demand').textContent = '--';
+  $('#schedule-current').textContent = '--';
+  $('#schedule-protection').textContent = 'No saved schedule';
+  $('#schedule-capacity').textContent = 'Add a load circuit to calculate capacity.';
+  $('#schedule-rcd-result').textContent = 'RCD: --';
+  $('#schedule-balance-result').textContent = 'Phase balance: --';
+  $('#schedule-neutral-result').textContent = 'Estimated neutral: --';
+  $('#schedule-status').className = 'schedule-status';
+  $('#schedule-status').querySelector('strong').textContent = 'Ready for review';
+  $('#schedule-status').querySelector('p').textContent = 'Add a load circuit to calculate a schedule. Verify the applicable standard before use.';
 }
 
 function calculateSchedule() {
@@ -267,6 +497,15 @@ function calculateSchedule() {
     }))
   });
   if (!result.valid) {
+    lastScheduleResult = null;
+    $('#schedule-connected').textContent = '--';
+    $('#schedule-demand').textContent = '--';
+    $('#schedule-current').textContent = '--';
+    $('#schedule-protection').textContent = 'Review inputs';
+    $('#schedule-capacity').textContent = result.error;
+    $('#schedule-status').className = 'schedule-status review';
+    $('#schedule-status').querySelector('strong').textContent = 'Review required';
+    $('#schedule-status').querySelector('p').textContent = result.error;
     showToast(result.error);
     return;
   }
@@ -274,7 +513,7 @@ function calculateSchedule() {
   $('#schedule-connected').textContent = `${result.connected.toFixed(2)} kW`;
   $('#schedule-demand').textContent = `${result.demand.toFixed(2)} kW`;
   $('#schedule-current').textContent = `${result.current.toFixed(2)} A`;
-  $('#schedule-protection').textContent = `${result.cable.breaker}A Type C · ${result.cable.size} mm²`;
+  $('#schedule-protection').textContent = `${result.breakerRating ? `${result.breakerRating}A Type C` : 'No coordinated breaker'} · ${result.cable.size} mm²`;
   $('#schedule-capacity').textContent = `Derated cable capacity: ${result.deratedCapacity.toFixed(1)} A`;
   $('#schedule-rcd-result').textContent = `RCD: ${$('#schedule-rcd').value === 'recommended' ? '30 mA protection recommended' : 'Confirm requirement separately'}`;
   $('#schedule-balance-result').textContent = `Phase balance: ${result.balancePercent.toFixed(1)}% spread`;
@@ -298,28 +537,61 @@ function calculateLoad(event) {
   const installMethod = $('#calc-install-method').value;
   const result = window.DangoteAcademyCore.calculateLoadSizing({ phase, loadType, loadValue, pf, diversity, installMethod, cableLength, ambientFactor, groupingFactor });
   if (!result.valid) {
+    lastCalculation = null;
+    $('#add-to-boq').disabled = true;
+    $('#res-capacity-warning').textContent = result.error;
+    $('#res-capacity-warning').className = 'warning';
     showToast(result.error);
     return;
   }
+  lastCalculation = null;
+  $('#add-to-boq').disabled = !result.withinCapacity || !result.protectionCoordinated;
   $('#res-current').textContent = result.current.toFixed(2);
   $('#res-cable').textContent = result.cable.size;
   $('#res-capacity').textContent = result.actualCapacity;
+  $('#res-capacity-warning').textContent = result.withinCapacity && result.protectionCoordinated
+    ? ''
+    : !result.withinCapacity
+      ? `No listed cable is adequate for ${result.current.toFixed(2)} A at the selected correction factors.`
+      : 'No listed breaker rating coordinates with this cable and design current.';
+  $('#res-capacity-warning').className = result.withinCapacity && result.protectionCoordinated ? '' : 'warning';
   $('#res-method-txt').textContent = result.methodLabel;
-  $('#res-breaker').textContent = `${result.cable.breaker}A Type C`;
+  $('#res-breaker').textContent = result.breakerRating ? `${result.breakerRating}A Type C` : 'No coordinated breaker';
   $('#res-vdrop').textContent = `${result.voltageDrop} V`;
   $('#res-vdrop').className = result.voltageDrop > result.voltage * .05 ? 'warning' : 'safe';
   const derating = Number.isFinite(result.derating) ? result.derating : result.actualCapacity / result.cable.capacity;
   const voltageDropPercent = Number.isFinite(result.voltageDropPercent) ? result.voltageDropPercent : result.voltageDrop / result.voltage * 100;
   $('#res-derating').textContent = `${(derating * 100).toFixed(0)}`;
   $('#res-vdrop-percent').textContent = voltageDropPercent.toFixed(2);
-  lastCalculation = { cable: result.cable, breaker: `${result.cable.breaker}A Type C` };
-  showToast('Cable sizing result updated.');
+  if (result.withinCapacity && result.protectionCoordinated) {
+    lastCalculation = {
+      inputs: getLoadSizingInputs(),
+      current: result.current,
+      cable: result.cable,
+      breaker: `${result.breakerRating}A Type C`,
+      breakerRating: result.breakerRating,
+      derating: result.derating,
+      actualCapacity: result.actualCapacity,
+      cableLength: result.cableLength,
+      voltageDrop: result.voltageDrop,
+      voltageDropPercent: result.voltageDropPercent,
+      voltage: result.voltage,
+      withinCapacity: result.withinCapacity,
+      protectionCoordinated: result.protectionCoordinated
+    };
+    showToast('Cable sizing result updated.');
+  } else {
+    showToast('No coordinated cable and breaker combination is available. Review the load and installation.');
+  }
 }
 
 function updateBOQ() {
   let total = 0;
   $$('#boq-body tr').forEach(row => {
-    const qty = Number($('.qty-input', row)?.value) || 0;
+    const input = $('.qty-input', row);
+    const value = Number(input?.value);
+    const qty = Number.isFinite(value) && value >= 0 ? value : 0;
+    if (input && qty !== value) input.value = String(qty);
     const unitPrice = Number($('.unit-price', row)?.textContent.replace(/,/g, '')) || 0;
     const rowTotal = qty * unitPrice;
     $('.item-total', row).textContent = rowTotal.toLocaleString('en-US');
@@ -327,6 +599,7 @@ function updateBOQ() {
   });
   $('#boq-total').textContent = total.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   if (!restoringBOQ) saveBOQ();
+  renderDashboard();
 }
 
 function saveBOQ() {
@@ -373,16 +646,21 @@ function openProjectDatabase() {
   }
 
 async function persistProjects(projects) {
+    if (browserTestMode) return;
     try {
       const database = await openProjectDatabase();
-      await new Promise((resolve, reject) => {
-        const transaction = database.transaction('projects', 'readwrite');
-        transaction.objectStore('projects').clear();
-        projects.forEach(project => transaction.objectStore('projects').put(project));
-        transaction.oncomplete = resolve;
-        transaction.onerror = () => reject(transaction.error || new Error('Project database write failed.'));
-      });
-      database.close();
+      try {
+        await new Promise((resolve, reject) => {
+          const transaction = database.transaction('projects', 'readwrite');
+          transaction.objectStore('projects').clear();
+          projects.forEach(project => transaction.objectStore('projects').put(project));
+          transaction.oncomplete = resolve;
+          transaction.onerror = () => reject(transaction.error || new Error('Project database write failed.'));
+          transaction.onabort = () => reject(transaction.error || new Error('Project database write was aborted.'));
+        });
+      } finally {
+        database.close();
+      }
     } catch (error) {
       console.warn('IndexedDB project persistence unavailable; localStorage remains active.', error);
     }
@@ -391,18 +669,25 @@ async function persistProjects(projects) {
 async function restoreProjectsFromDatabase() {
       try {
         const database = await openProjectDatabase();
-        const projects = await new Promise((resolve, reject) => {
-          const request = database.transaction('projects', 'readonly').objectStore('projects').getAll();
-          request.onsuccess = () => resolve(request.result);
-          request.onerror = () => reject(request.error || new Error('Project database read failed.'));
-        });
-        database.close();
-        if (projects.length) {
-          localStorage.setItem('dangote-academy-projects', JSON.stringify(projects));
+        let databaseProjects;
+        try {
+          databaseProjects = await new Promise((resolve, reject) => {
+            const request = database.transaction('projects', 'readonly').objectStore('projects').getAll();
+            request.onsuccess = () => resolve(request.result);
+            request.onerror = () => reject(request.error || new Error('Project database read failed.'));
+          });
+        } finally {
+          database.close();
+        }
+        if (projectsChangedDuringStartup) return;
+        const localProjects = getSavedProjects();
+        if (localProjects.length) {
+          await persistProjects(localProjects);
+        } else if (databaseProjects.length) {
+          localStorage.setItem('dangote-academy-projects', JSON.stringify(databaseProjects));
           refreshProjectList();
+          renderRevisionControls();
           renderReview();
-        } else if (getSavedProjects().length) {
-          persistProjects(getSavedProjects());
         }
       } catch (error) {
         console.warn('IndexedDB project restore unavailable; localStorage remains active.', error);
@@ -415,6 +700,9 @@ function projectSnapshot(name) {
       savedAt: new Date().toISOString(),
       rows: getBOQRows(),
       circuit: serialiseCircuit(),
+      schedule: getLoadScheduleSnapshot(),
+      calculationInputs: getLoadSizingInputs(),
+      calculation: lastCalculation,
       owner: getProfile(),
       status: 'draft',
       comments: '',
@@ -422,6 +710,25 @@ function projectSnapshot(name) {
       resubmissionCount: 0,
       revisions: []
     };
+}
+
+function validateProjectWorkspace(project) {
+  if (!project || !Array.isArray(project.rows) || !project.circuit) {
+    throw new Error('Invalid project workspace.');
+  }
+  if (project.rows.some(row => !row || typeof row.description !== 'string' ||
+    typeof row.category !== 'string' || typeof row.unit !== 'string' ||
+    !Number.isFinite(Number(row.quantity)) || Number(row.quantity) < 0 ||
+    !Number.isFinite(Number(row.price)) || Number(row.price) < 0)) {
+    throw new Error('Invalid project BOQ.');
+  }
+  validateCircuitData(project.circuit);
+  if (project.schedule && !isValidLoadScheduleSnapshot(project.schedule)) {
+    throw new Error('Invalid project load schedule.');
+  }
+  if (project.calculationInputs && !isValidLoadSizingInputs(project.calculationInputs)) {
+    throw new Error('Invalid project calculation inputs.');
+  }
 }
 
 function refreshProjectList() {
@@ -441,23 +748,47 @@ function saveNamedProject() {
     showToast('Enter a project name before saving.');
     return;
   }
-  const projects = getSavedProjects().filter(project => project.name !== name);
-  const previous = getSavedProjects().find(project => project.name === name);
+  const existingProjects = getSavedProjects();
+  const previous = existingProjects.find(project => project.name === name);
   const project = projectSnapshot(name);
-  project.status = previous?.status || 'draft';
-  project.comments = previous?.comments || '';
-  project.reviewHistory = previous?.reviewHistory || [];
+  const changed = Boolean(previous && (
+    JSON.stringify(previous.rows || []) !== JSON.stringify(project.rows) ||
+    JSON.stringify(previous.circuit || {}) !== JSON.stringify(project.circuit) ||
+    JSON.stringify(previous.schedule || null) !== JSON.stringify(project.schedule) ||
+    JSON.stringify(previous.calculationInputs || null) !== JSON.stringify(project.calculationInputs)
+  ));
+  project.status = changed && ['submitted', 'approved'].includes(previous?.status)
+    ? 'draft'
+    : previous?.status || 'draft';
+  project.comments = changed ? '' : previous?.comments || '';
+  project.reviewHistory = Array.isArray(previous?.reviewHistory) ? [...previous.reviewHistory] : [];
   project.resubmissionCount = previous?.resubmissionCount || 0;
   project.owner = previous?.owner || getProfile();
-  project.revisions = [...(previous?.revisions || []), {
-    revisionId: `r-${Date.now()}`,
-    savedAt: previous?.savedAt || project.savedAt,
-    rows: previous?.rows || project.rows,
-    circuit: previous?.circuit || project.circuit,
-    status: previous?.status || 'draft'
-  }].slice(-10);
+  project.revisions = Array.isArray(previous?.revisions) ? [...previous.revisions] : [];
+  if (previous && changed) {
+    project.revisions.push({
+      revisionId: `r-${Date.now()}`,
+      savedAt: previous.savedAt || project.savedAt,
+      rows: previous.rows || [],
+      circuit: previous.circuit || { version: 2, components: [], connections: [] },
+      schedule: previous.schedule || null,
+      calculationInputs: previous.calculationInputs || null,
+      calculation: previous.calculation || null,
+      status: previous.status || 'draft'
+    });
+    if (['submitted', 'approved'].includes(previous.status)) {
+      project.reviewHistory.push({
+        action: 'Updated after review; returned to draft',
+        actor: getProfile().name,
+        at: project.savedAt
+      });
+    }
+  }
+  project.revisions = project.revisions.slice(-10);
+  const projects = existingProjects.filter(item => item.name !== name);
   projects.push(project);
   localStorage.setItem('dangote-academy-projects', JSON.stringify(projects));
+  projectsChangedDuringStartup = true;
   persistProjects(projects);
   refreshProjectList();
   $('#project-list').value = name;
@@ -482,7 +813,8 @@ function renderRevisionControls(name = $('#project-list')?.value) {
 function compareProjectRevisions() {
   const name = $('#project-list')?.value;
   const project = getSavedProjects().find(item => item.name === name);
-  const index = Number($('#project-revision-list')?.value);
+  const selectedRevision = $('#project-revision-list')?.value;
+  const index = selectedRevision === '' ? -1 : Number(selectedRevision);
   const target = project?.revisions?.[index];
   const output = $('#revision-comparison');
   if (!project || !target || !output) {
@@ -491,37 +823,45 @@ function compareProjectRevisions() {
   }
   const currentRows = project.rows || [];
   const currentComponents = project.circuit?.components || [];
+  const currentConnections = project.circuit?.connections || [];
   const targetRows = target.rows || [];
   const targetComponents = target.circuit?.components || [];
+  const targetConnections = target.circuit?.connections || [];
   const result = {
     project: name,
     revision: index,
     boqChanged: JSON.stringify(currentRows) !== JSON.stringify(targetRows),
     circuitChanged: JSON.stringify(project.circuit || {}) !== JSON.stringify(target.circuit || {}),
+    scheduleChanged: JSON.stringify(project.schedule || null) !== JSON.stringify(target.schedule || null),
+    calculationChanged: JSON.stringify(project.calculationInputs || null) !== JSON.stringify(target.calculationInputs || null),
+    reviewStatusChanged: (project.status || 'draft') !== (target.status || 'draft'),
     boqItems: `${targetRows.length} → ${currentRows.length}`,
-    components: `${targetComponents.length} → ${currentComponents.length}`
+    components: `${targetComponents.length} → ${currentComponents.length}`,
+    connections: `${targetConnections.length} → ${currentConnections.length}`,
+    loads: `${target.schedule?.rows?.length || 0} → ${project.schedule?.rows?.length || 0}`
   };
-  output.textContent = `Revision ${index + 1}: ${result.boqChanged ? 'BOQ changed' : 'BOQ unchanged'} · ${result.circuitChanged ? 'Circuit changed' : 'Circuit unchanged'} · items ${result.boqItems} · components ${result.components}`;
+  output.textContent = `Revision ${index + 1}: ${result.boqChanged ? 'BOQ changed' : 'BOQ unchanged'} · ${result.circuitChanged ? 'Circuit changed' : 'Circuit unchanged'} · ${result.scheduleChanged ? 'Load schedule changed' : 'Load schedule unchanged'} · ${result.calculationChanged ? 'Sizing inputs changed' : 'Sizing inputs unchanged'} · review status ${result.reviewStatusChanged ? 'changed' : 'unchanged'} · items ${result.boqItems} · components ${result.components} · connections ${result.connections} · schedule rows ${result.loads}`;
   return result;
 }
 
 function restoreProjectRevision() {
   const name = $('#project-list')?.value;
-  const index = Number($('#project-revision-list')?.value);
+  const selectedRevision = $('#project-revision-list')?.value;
+  const index = selectedRevision === '' ? -1 : Number(selectedRevision);
   const project = getSavedProjects().find(item => item.name === name);
   const revision = project?.revisions?.[index];
   if (!project || !revision) {
     showToast('Choose a saved revision first.');
     return;
   }
-
-  function compareRevisions() {
-    return compareProjectRevisions();
+  try {
+    validateProjectWorkspace(revision);
+  } catch (error) {
+    console.error('Project revision could not be restored.', error);
+    showToast('The selected project revision is invalid.');
+    return;
   }
 
-  function restoreRevision() {
-    return restoreProjectRevision();
-  }
   restoringBOQ = true;
   $('#project-name').value = project.name;
   $('#boq-body').innerHTML = '';
@@ -529,6 +869,10 @@ function restoreProjectRevision() {
   restoringBOQ = false;
   updateBOQ();
   if (revision.circuit) restoreCircuit(revision.circuit);
+  if (revision.schedule) restoreLoadSchedule(revision.schedule);
+  else resetLoadSchedule();
+  if (revision.calculationInputs) restoreLoadSizingInputs(revision.calculationInputs);
+  else invalidateLoadSizingResult();
   showToast(`Revision ${index + 1} restored to the workspace. Save the project to keep it.`);
 }
 
@@ -536,6 +880,13 @@ function loadNamedProject() {
   const name = $('#project-list').value;
   const project = getSavedProjects().find(item => item.name === name);
   if (!project) return;
+  try {
+    validateProjectWorkspace(project);
+  } catch (error) {
+    console.error('Saved project could not be loaded.', error);
+    showToast('The selected saved project is invalid.');
+    return;
+  }
   restoringBOQ = true;
   $('#project-name').value = project.name;
   $('#boq-body').innerHTML = '';
@@ -543,23 +894,33 @@ function loadNamedProject() {
   restoringBOQ = false;
   updateBOQ();
   if (project.circuit) restoreCircuit(project.circuit);
+  if (project.schedule) restoreLoadSchedule(project.schedule);
+  else resetLoadSchedule();
+  if (project.calculationInputs) restoreLoadSizingInputs(project.calculationInputs);
+  else invalidateLoadSizingResult();
   showToast(`Project loaded: ${project.name}`);
 }
 
 function deleteNamedProject() {
+  if (!canManageWorkspace()) {
+    showToast('Only administrators can delete saved projects.');
+    return false;
+  }
   const name = $('#project-list').value;
   if (!name) {
     showToast('Choose a saved project first.');
-    return;
+    return false;
   }
   const projects = getSavedProjects().filter(project => project.name !== name);
   localStorage.setItem('dangote-academy-projects', JSON.stringify(projects));
+  projectsChangedDuringStartup = true;
   persistProjects(projects);
   refreshProjectList();
   renderRevisionControls();
   renderReview();
   renderAdminTools();
   showToast(`Project deleted: ${name}`);
+  return true;
 }
 
 function exportProject() {
@@ -575,6 +936,18 @@ function exportProject() {
 function buildEngineeringReport() {
   const projectName = $('#project-name')?.value.trim() || 'Electrical Academy Project';
   const progress = getStudentProgressSummary();
+  const scheduleInputs = getLoadScheduleSnapshot();
+  const scheduleResult = window.DangoteAcademyCore.calculateScheduleSizing({
+    ...scheduleInputs,
+    rows: scheduleInputs.rows.map(row => ({
+      ...row,
+      load: Number(row.load),
+      quantity: Number(row.quantity),
+      pf: Number(row.pf),
+      diversity: Number(row.diversity)
+    }))
+  });
+  const circuitValid = validateCircuit();
   return {
     schemaVersion: 1,
     reportType: 'unified-engineering-report',
@@ -586,8 +959,17 @@ function buildEngineeringReport() {
       boq: getBOQRows(),
       total: $('#boq-total')?.textContent || '0.00',
       circuit: serialiseCircuit(),
+      scheduleInputs: getLoadScheduleSnapshot(),
+      circuitValidation: {
+        valid: circuitValid,
+        message: $('#circuit-message')?.textContent || ''
+      },
       calculation: lastCalculation,
-      schedule: lastScheduleResult,
+      schedule: scheduleResult.valid ? scheduleResult : null,
+      scheduleValidation: {
+        valid: scheduleResult.valid,
+        message: scheduleResult.error || ''
+      },
       review: getSavedProjects().find(project => project.name === projectName)?.reviewHistory || []
     },
     learning: {
@@ -612,16 +994,25 @@ function exportEngineeringReport() {
 }
 
 function importProject(event) {
+  if (!canManageWorkspace()) {
+    showToast('Only administrators can import saved projects.');
+    event.target.value = '';
+    return;
+  }
   const file = event.target.files[0];
   if (!file) return;
   const reader = new FileReader();
   reader.onload = () => {
     try {
       const project = JSON.parse(reader.result);
-      if (!project || typeof project.name !== 'string' || !Array.isArray(project.rows) || !project.circuit) throw new Error('Invalid project.');
+      if (!project || typeof project.name !== 'string' || !project.name.trim()) {
+        throw new Error('Invalid project.');
+      }
+      validateProjectWorkspace(project);
       const projects = getSavedProjects().filter(item => item.name !== project.name);
       projects.push(project);
       localStorage.setItem('dangote-academy-projects', JSON.stringify(projects));
+      projectsChangedDuringStartup = true;
       persistProjects(projects);
       refreshProjectList();
       $('#project-list').value = project.name;
@@ -629,7 +1020,8 @@ function importProject(event) {
       renderReview();
       loadNamedProject();
       showToast(`Project imported: ${project.name}`);
-    } catch {
+    } catch (error) {
+      console.error('Project import failed validation.', error);
       showToast('The selected project file is invalid.');
     }
   };
@@ -646,10 +1038,20 @@ function restoreBOQ() {
     return;
   }
   if (!Array.isArray(saved) || !saved.length) return;
+  if (saved.some(item => !item || typeof item.description !== 'string' ||
+    typeof item.category !== 'string' || typeof item.unit !== 'string' ||
+    !Number.isFinite(Number(item.quantity)) || Number(item.quantity) < 0 ||
+    !Number.isFinite(Number(item.price)) || Number(item.price) < 0)) {
+    showToast('Saved BOQ contains invalid entries and was not restored.');
+    return;
+  }
   restoringBOQ = true;
-  $('#boq-body').innerHTML = '';
-  saved.forEach(item => addBoqRow(item.description, item.category, item.quantity, item.unit, item.price));
-  restoringBOQ = false;
+  try {
+    $('#boq-body').innerHTML = '';
+    saved.forEach(item => addBoqRow(item.description, item.category, item.quantity, item.unit, item.price));
+  } finally {
+    restoringBOQ = false;
+  }
 }
 
 function addBoqRow(description, category, quantity, unit, price) {
@@ -661,7 +1063,7 @@ function addBoqRow(description, category, quantity, unit, price) {
 
 function exportPdf() {
   if (!window.jspdf?.jsPDF || typeof window.jspdf.jsPDF.API?.autoTable !== 'function') {
-    showToast('PDF libraries are unavailable. Check your internet connection.');
+    showToast('PDF export is unavailable because the bundled PDF libraries did not load.');
     return;
   }
   const { jsPDF } = window.jspdf;
@@ -673,9 +1075,17 @@ function exportPdf() {
   doc.setFontSize(11); doc.setTextColor(16, 41, 66); doc.text(`Total estimate: N ${$('#boq-total').textContent}`, 14, doc.lastAutoTable.finalY + 10); doc.save('Electrical_BOQ_Report.pdf');
 }
 
-function createComponent(type, x, y) {
+function createComponent(type, x, y, preferredId) {
+  if (!circuitComponentTypes.includes(type)) throw new Error('Unsupported circuit component.');
+  if (!Number.isFinite(Number(x)) || !Number.isFinite(Number(y))) throw new Error('Component position must be numeric.');
   if (!restoringCircuit) pushCircuitHistory();
-  const id = `component-${componentId++}`;
+  const usePreferredId = restoringCircuit && typeof preferredId === 'string' &&
+    /^[A-Za-z][A-Za-z0-9_-]{0,79}$/.test(preferredId) && !document.getElementById(preferredId);
+  let id = usePreferredId ? preferredId : '';
+  while (!id) {
+    const candidate = `component-${componentId++}`;
+    if (!document.getElementById(candidate)) id = candidate;
+  }
   const labels = { 'source-ac': ['AC mains', '∿'], battery: ['Battery', '＋'], mcb: ['MCB', 'M'], rcd: ['RCD', 'R'], 'switch-1way': ['Switch', '╱'], timer: ['Timer', 'T'], relay: ['Relay', 'K'], junction: ['Junction', '＋'], lamp: ['Lamp', '◉'], socket: ['Socket', 'S'], motor: ['Motor', 'M'] };
   const [label, symbol] = labels[type] || [type, '?'];
   const element = document.createElement('div');
@@ -791,7 +1201,8 @@ function redoCircuit() {
 
 function validateCircuit() {
   const components = $$('.circuit-component');
-  const source = components.find(item => ['source-ac', 'battery'].includes(item.dataset.type));
+  const sources = components.filter(item => ['source-ac', 'battery'].includes(item.dataset.type));
+  const source = sources[0];
   const loads = components.filter(item => ['lamp', 'socket', 'motor'].includes(item.dataset.type));
   const protectedTypes = ['mcb', 'rcd'];
   const hasProtection = components.some(item => protectedTypes.includes(item.dataset.type));
@@ -800,6 +1211,7 @@ function validateCircuit() {
   const reachable = new Set(source ? [source.id] : []);
   const queue = source ? [source.id] : [];
   while (queue.length) graph.get(queue.shift()).forEach(id => { if (!reachable.has(id)) { reachable.add(id); queue.push(id); } });
+  const allComponentsConnected = reachable.size === components.length;
   const connectedLoad = loads.some(load => reachable.has(load.id));
   const lineGraph = new Map(components.map(item => [item.id, []]));
   circuitConnections.filter(connection => phaseConductors.includes(connection.conductor)).forEach(connection => {
@@ -810,6 +1222,24 @@ function validateCircuit() {
   const lineQueue = source ? [source.id] : [];
   while (lineQueue.length) lineGraph.get(lineQueue.shift()).forEach(id => { if (!lineReachable.has(id)) { lineReachable.add(id); lineQueue.push(id); } });
   const lineConnectedLoad = loads.some(load => lineReachable.has(load.id));
+  const protectedLineStates = new Set();
+  const protectedLineQueue = source ? [{ id: source.id, protected: false }] : [];
+  let protectedLinePath = false;
+  while (protectedLineQueue.length) {
+    const current = protectedLineQueue.shift();
+    const stateKey = `${current.id}:${current.protected}`;
+    if (protectedLineStates.has(stateKey)) continue;
+    protectedLineStates.add(stateKey);
+    const component = $(`#${current.id}`);
+    const hasReachedProtection = current.protected || protectedTypes.includes(component?.dataset.type);
+    if (hasReachedProtection && loads.some(load => load.id === current.id)) {
+      protectedLinePath = true;
+      break;
+    }
+    lineGraph.get(current.id).forEach(id => {
+      protectedLineQueue.push({ id, protected: hasReachedProtection });
+    });
+  }
   const fault = $('#circuit-fault')?.value || circuitFault;
   const hasRcd = components.some(item => item.dataset.type === 'rcd');
   const hasEarthPath = circuitConnections.some(connection => connection.conductor === 'earth');
@@ -836,8 +1266,34 @@ function validateCircuit() {
       links.some(connection => connection.from === junction.id && connection.fromTerminal === 'branch-b');
   });
   const earthLeakageReady = fault !== 'earth-leakage' || (hasRcd && hasEarthPath);
-  const complete = Boolean(source && loads.length && hasProtection && connectedLoad && lineConnectedLoad && terminalsComplete && destinationsUnique && junctionsComplete && earthLeakageReady && circuitConnections.length >= components.length - 1);
-  const message = !source ? 'Add a source.' : !loads.length ? 'Add at least one load.' : !hasProtection ? 'Add an MCB or RCD.' : !connectedLoad ? 'Connect the source path to a load.' : !lineConnectedLoad ? 'Add a line / phase conductor path to a load.' : !terminalsComplete ? 'Use valid terminals for every wire.' : !destinationsUnique ? 'Do not duplicate a destination terminal on the same conductor.' : !junctionsComplete ? 'Connect each junction input and both branch terminals.' : !earthLeakageReady ? 'Earth leakage requires an RCD and protective-earth path.' : complete ? 'Topology is complete for this training exercise.' : 'Connect every component into one circuit path.';
+  const complete = Boolean(sources.length === 1 && loads.length && hasProtection && protectedLinePath &&
+    connectedLoad && lineConnectedLoad && allComponentsConnected && terminalsComplete &&
+    destinationsUnique && junctionsComplete && earthLeakageReady);
+  const message = sources.length === 0
+    ? 'Add a source.'
+    : sources.length > 1
+      ? 'Use one source per training circuit.'
+      : !loads.length
+        ? 'Add at least one load.'
+        : !hasProtection
+          ? 'Add an MCB or RCD.'
+          : !protectedLinePath
+            ? 'Connect an MCB or RCD on the line / phase path.'
+            : !connectedLoad
+              ? 'Connect the source path to a load.'
+              : !lineConnectedLoad
+                ? 'Add a line / phase conductor path to a load.'
+                : !allComponentsConnected
+                  ? 'Connect every component into the source circuit.'
+                  : !terminalsComplete
+                    ? 'Use valid terminals for every wire.'
+                    : !destinationsUnique
+                      ? 'Do not duplicate a destination terminal on the same conductor.'
+                      : !junctionsComplete
+                        ? 'Connect each junction input and both branch terminals.'
+                        : !earthLeakageReady
+                          ? 'Earth leakage requires an RCD and protective-earth path.'
+                          : 'Topology is complete for this training exercise.';
   $('#circuit-validation').textContent = complete ? 'Circuit valid' : 'Review required';
   $('#circuit-validation').className = complete ? 'validation-good' : 'validation-warning';
   $('#circuit-message').textContent = message;
@@ -852,29 +1308,78 @@ function serialiseCircuit() {
   };
 }
 
-function restoreCircuit(data) {
-  if (!data || ![1, 2].includes(data.version) || !Array.isArray(data.components) || !Array.isArray(data.connections)) throw new Error('Unsupported circuit file.');
-  if (data.connections.some(connection => !conductorTypes.includes(connection.conductor || 'line'))) throw new Error('Unsupported conductor type.');
-  restoringCircuit = true;
-  $('#circuit-canvas').querySelectorAll('.circuit-component').forEach(item => item.remove());
-  circuitConnections = [];
-  const ids = data.components.map(item => createComponent(item.type, item.left, item.top));
-  const idMap = new Map(data.components.map((item, index) => [item.id, ids[index]]));
-  data.components.forEach((item, index) => {
-    const element = $(`#${ids[index]}`);
-    if (!element) return;
-    element.dataset.state = item.state || element.dataset.state;
-    if (item.type === 'timer' && Number.isFinite(Number(item.timerSeconds))) element.dataset.timerSeconds = String(Math.max(0, Number(item.timerSeconds)));
-  });
-  data.connections.forEach(connection => {
-    if (idMap.has(connection.from) && idMap.has(connection.to)) {
-      circuitConnections.push({ from: idMap.get(connection.from), fromTerminal: connection.fromTerminal || 'out', to: idMap.get(connection.to), toTerminal: connection.toTerminal || 'in', conductor: connection.conductor || 'line' });
+function validateCircuitData(data) {
+  if (!data || ![1, 2].includes(data.version) || !Array.isArray(data.components) || !Array.isArray(data.connections)) {
+    throw new Error('Unsupported circuit file.');
+  }
+  if (data.components.length > 500 || data.connections.length > 2000) {
+    throw new Error('Circuit file exceeds the supported size.');
+  }
+  const ids = new Set();
+  const componentMap = new Map();
+  data.components.forEach(component => {
+    if (!component || typeof component.id !== 'string' || !component.id || ids.has(component.id) ||
+      !circuitComponentTypes.includes(component.type) ||
+      !Number.isFinite(Number(component.left)) || !Number.isFinite(Number(component.top)) ||
+      Number(component.left) < 0 || Number(component.top) < 0 ||
+      (component.state !== undefined && !['on', 'off'].includes(component.state)) ||
+      (component.type === 'timer' && component.timerSeconds !== undefined &&
+        (!Number.isFinite(Number(component.timerSeconds)) || Number(component.timerSeconds) < 0))) {
+      throw new Error('Invalid circuit component.');
     }
+    ids.add(component.id);
+    componentMap.set(component.id, component.type);
   });
-  renderCircuitWires();
-  updateCircuitSummary();
-  validateCircuit();
-  restoringCircuit = false;
+  const destinationUse = new Set();
+  data.connections.forEach(connection => {
+    if (!connection || !componentMap.has(connection.from) || !componentMap.has(connection.to) ||
+      connection.from === connection.to) {
+      throw new Error('Invalid circuit connection reference.');
+    }
+    if (!conductorTypes.includes(connection.conductor || 'line')) {
+      throw new Error('Unsupported conductor type.');
+    }
+    const fromTerminals = componentMap.get(connection.from) === 'junction'
+      ? ['in', 'out', 'branch-a', 'branch-b']
+      : ['in', 'out'];
+    const toTerminals = componentMap.get(connection.to) === 'junction'
+      ? ['in', 'out', 'branch-a', 'branch-b']
+      : ['in', 'out'];
+    const fromTerminal = connection.fromTerminal || 'out';
+    const toTerminal = connection.toTerminal || 'in';
+    if (!fromTerminals.includes(fromTerminal) || !toTerminals.includes(toTerminal)) {
+      throw new Error('Invalid circuit terminal.');
+    }
+    const destination = `${connection.to}:${toTerminal}:${connection.conductor || 'line'}`;
+    if (destinationUse.has(destination)) throw new Error('Duplicate destination terminal.');
+    destinationUse.add(destination);
+  });
+  return true;
+}
+
+function restoreCircuit(data) {
+  validateCircuitData(data);
+  restoringCircuit = true;
+  try {
+    $('#circuit-canvas').querySelectorAll('.circuit-component').forEach(item => item.remove());
+    circuitConnections = [];
+    const ids = data.components.map(item => createComponent(item.type, item.left, item.top, item.id));
+    const idMap = new Map(data.components.map((item, index) => [item.id, ids[index]]));
+    data.components.forEach((item, index) => {
+      const element = $(`#${ids[index]}`);
+      if (!element) return;
+      element.dataset.state = item.state || element.dataset.state;
+      if (item.type === 'timer' && Number.isFinite(Number(item.timerSeconds))) element.dataset.timerSeconds = String(Math.max(0, Number(item.timerSeconds)));
+    });
+    data.connections.forEach(connection => {
+      circuitConnections.push({ from: idMap.get(connection.from), fromTerminal: connection.fromTerminal || 'out', to: idMap.get(connection.to), toTerminal: connection.toTerminal || 'in', conductor: connection.conductor || 'line' });
+    });
+    renderCircuitWires();
+    updateCircuitSummary();
+    validateCircuit();
+  } finally {
+    restoringCircuit = false;
+  }
 }
 
 function saveCircuit() {
@@ -1023,8 +1528,36 @@ function answerTroubleshooting(event) {
 function toggleSimulation() {
   isSimulating = !isSimulating;
   const button = $('#simulate-circuit'); const indicator = $('#sim-indicator');
-  if (isSimulating) { button.innerHTML = '<i class="fa-solid fa-stop"></i> Stop simulation'; button.className = 'secondary-button'; $('#sim-status').textContent = 'Simulation running'; indicator.className = 'fa-solid fa-circle running'; simulationTimer = setInterval(() => { simulationSeconds += 1; $$('.circuit-component[data-type="timer"]').forEach(timer => { timer.dataset.timerSeconds = String(Number(timer.dataset.timerSeconds || 5) - 1); if (Number(timer.dataset.timerSeconds) <= 0) timer.dataset.state = 'on'; }); $('#sim-energy').textContent = `${((Number($('#sim-p').textContent) * simulationSeconds) / 3600000).toFixed(2)} kWh`; checkCircuitLogic(); }, 1000); checkCircuitLogic(); }
-  else { clearInterval(simulationTimer); button.innerHTML = '<i class="fa-solid fa-play"></i> Run simulation'; button.className = 'success-button'; $('#sim-status').textContent = 'Simulation stopped'; indicator.className = 'fa-solid fa-circle stopped'; $('#sim-v').textContent = '0'; $('#sim-i').textContent = '0'; $('#sim-p').textContent = '0'; $$('.circuit-component').forEach(item => item.dataset.powered = 'false'); }
+  if (isSimulating) {
+    simulationSeconds = 0;
+    $('#sim-energy').textContent = '0.00 kWh';
+    button.innerHTML = '<i class="fa-solid fa-stop"></i> Stop simulation';
+    button.className = 'secondary-button';
+    $('#sim-status').textContent = 'Simulation running';
+    indicator.className = 'fa-solid fa-circle running';
+    simulationTimer = setInterval(() => {
+      simulationSeconds += 1;
+      $$('.circuit-component[data-type="timer"]').forEach(timer => {
+        const remaining = Math.max(0, Number(timer.dataset.timerSeconds ?? 5) - 1);
+        timer.dataset.timerSeconds = String(remaining);
+        if (remaining === 0) timer.dataset.state = 'on';
+      });
+      $('#sim-energy').textContent = `${((Number($('#sim-p').textContent) * simulationSeconds) / 3600000).toFixed(2)} kWh`;
+      checkCircuitLogic();
+    }, 1000);
+    checkCircuitLogic();
+  } else {
+    clearInterval(simulationTimer);
+    simulationTimer = null;
+    button.innerHTML = '<i class="fa-solid fa-play"></i> Run simulation';
+    button.className = 'success-button';
+    $('#sim-status').textContent = 'Simulation stopped';
+    indicator.className = 'fa-solid fa-circle stopped';
+    $('#sim-v').textContent = '0';
+    $('#sim-i').textContent = '0';
+    $('#sim-p').textContent = '0';
+    $$('.circuit-component').forEach(item => item.dataset.powered = 'false');
+  }
 }
 
 function initialise() {
@@ -1036,10 +1569,15 @@ function initialise() {
   $('#profile-role-display').textContent = `${profile.role[0].toUpperCase()}${profile.role.slice(1)} role`;
   $('#boq-date').textContent = new Date().toLocaleDateString('en-GB');
   insertLoadScheduleModule();
+  const capacityWarning = document.createElement('small');
+  capacityWarning.id = 'res-capacity-warning';
+  capacityWarning.setAttribute('role', 'status');
+  $('#res-capacity').closest('small').after(capacityWarning);
+  $('#add-to-boq').disabled = true;
   restoreBOQ();
   updateBOQ();
   refreshProjectList();
-  restoreProjectsFromDatabase();
+  if (!browserTestMode) restoreProjectsFromDatabase();
   renderComponentCatalog();
   renderTroubleshooting();
   renderLessons();
@@ -1050,6 +1588,11 @@ function initialise() {
   $$('[data-go]').forEach(item => item.addEventListener('click', () => switchModule(item.dataset.go)));
   $('#menu-toggle').addEventListener('click', () => $('#sidebar').classList.toggle('open'));
   $('#calc-form').addEventListener('submit', calculateLoad);
+  const invalidateCalculation = () => {
+    invalidateLoadSizingResult();
+  };
+  $('#calc-form').addEventListener('input', invalidateCalculation);
+  $('#calc-form').addEventListener('change', invalidateCalculation);
   $('#calc-form').addEventListener('invalid', event => { event.preventDefault(); showToast('Enter a load greater than zero and valid factor values.'); }, true);
   $('#add-to-boq').addEventListener('click', () => { if (!lastCalculation) { showToast('Run a calculation first.'); return; } addBoqRow(`${lastCalculation.cable.size}mm² Single Core Copper Wire`, 'Cabling', 1, 'Roll', lastCalculation.cable.size * 15000); addBoqRow(`${lastCalculation.breaker} MCB`, 'Protection', 1, 'Pcs', 4500); switchModule('boq'); showToast('Calculation added to the BOQ.'); });
   $('#boq-body').addEventListener('input', updateBOQ); $('#boq-body').addEventListener('click', event => { if (event.target.closest('.delete-row')) { event.target.closest('tr').remove(); updateBOQ(); } });
@@ -1063,9 +1606,17 @@ function initialise() {
   $('#export-review').addEventListener('click', exportReview);
   $('#save-profile').addEventListener('click', saveProfile);
   $('#review-projects').addEventListener('click', event => { const button = event.target.closest('.review-action'); if (button) updateProjectReviewStatus(button.dataset.name, button.dataset.status); });
-  $('#review-projects').addEventListener('input', event => { if (!event.target.matches('.review-comment-input')) return; const name = event.target.dataset.name; const projects = getSavedProjects().map(project => project.name === name ? { ...project, comments: event.target.value } : project); localStorage.setItem('dangote-academy-projects', JSON.stringify(projects)); persistProjects(projects); });
+  $('#review-projects').addEventListener('input', event => {
+    if (!event.target.matches('.review-comment-input') || !canReviewProjects()) return;
+    const name = event.target.dataset.name;
+    const projects = getSavedProjects().map(project => project.name === name && project.status === 'submitted'
+      ? { ...project, comments: event.target.value }
+      : project);
+    localStorage.setItem('dangote-academy-projects', JSON.stringify(projects));
+    projectsChangedDuringStartup = true;
+    persistProjects(projects);
+  });
   $$('[data-library-message]').forEach(button => button.addEventListener('click', () => showToast(button.dataset.libraryMessage)));
-  $('#upload-video').addEventListener('click', () => showToast('Video upload is queued for the next module release.'));
   $$('.component-drag').forEach(item => item.addEventListener('dragstart', event => event.dataTransfer.setData('type', item.dataset.type)));
   $('#circuit-canvas').addEventListener('dragover', event => event.preventDefault()); $('#circuit-canvas').addEventListener('drop', dropComponent);
   $('#clear-canvas').addEventListener('click', () => { pushCircuitHistory(); $$('.circuit-component').forEach(item => item.remove()); circuitConnections = []; pendingConnection = null; renderCircuitWires(); updateCircuitSummary(); validateCircuit(); if (isSimulating) toggleSimulation(); });

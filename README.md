@@ -14,6 +14,8 @@ python -m http.server 8000
 
 Then open `http://localhost:8000/`.
 
+From the parent workspace, open `Dangote-Electrical-Academy.code-workspace` to work in the active repository without including local history, archived prototypes, or bundled runtimes in the Explorer.
+
 ## Tests
 
 The pure calculation module has Node.js tests:
@@ -33,22 +35,23 @@ There is also a dependency-free browser test page at `tests/browser-test.html`.
 ## Offline support
 
 Runtime libraries are vendored under `assets/vendor/`. The application does not require a network connection after checkout.
+The dashboard summarizes projects, lesson progress, troubleshooting, and BOQ lines saved in the current browser; it does not display fabricated organization-wide activity.
 
 ## Circuit builder
 
-The circuit builder supports AC mains and battery sources, MCB/RCD protection, switches, junctions, lamps, sockets, and motors. Enable **Connect components**, choose a conductor (line, phases A/B/C, neutral, or protective earth), then select the visible output and input terminals to create a wire. Junctions expose an input and two branch outputs for simple parallel circuits. Validation requires a phase path to loads; earth-leakage exercises also require an RCD and protective-earth path. Use **Validate circuit** to check source, protection, load, terminal wiring, conductor, and connectivity requirements. Diagrams can be saved locally, loaded, exported as JSON, and imported from JSON. Simulation reports voltage, current, power, and estimated energy for the training circuit. Existing version-1 diagrams remain importable and are upgraded when restored.
+The circuit builder supports AC mains and battery sources, MCB/RCD protection, switches, junctions, lamps, sockets, and motors. Enable **Connect components**, choose a conductor (line, phases A/B/C, neutral, or protective earth), then select the visible output and input terminals to create a wire. Junctions expose an input and two branch outputs for simple parallel circuits. Validation requires exactly one source, a connected topology, protection on the line/phase path to a load, and an earth-leakage path with an RCD when that fault is selected. Use **Validate circuit** to check source, protection, load, terminal wiring, conductor, and connectivity requirements. Diagrams can be saved locally, loaded, exported as JSON, and imported from JSON. Simulation reports voltage, current, power, and estimated energy for the training circuit. Existing version-1 diagrams remain importable and are upgraded when restored.
 
 Undo/redo is available for diagram edits, and fault modes simulate open circuits, short circuits, and earth leakage for classroom exercises. Junction branches use separate branch A and branch B terminals, and validation rejects invalid or duplicated destination terminals.
 
 ## Engineering calculator
 
-Cable sizing accepts cable length, ambient-temperature correction, and grouping correction factors. Results show adjusted derating and voltage-drop percentage. These remain training estimates and must be checked against the applicable installation standard before field use.
+Cable sizing accepts cable length, ambient-temperature correction, and grouping correction factors. Results show adjusted derating, voltage-drop percentage, and a breaker rating coordinated against the adjusted cable capacity where the training model has a suitable combination. Loads beyond the model's cable or breaker table are flagged instead of being presented as a complete recommendation. These remain training estimates and must be checked against the applicable installation standard before field use.
 
 Three-phase load schedules assign each circuit to Phase A, B, or C and report phase-current spread, estimated neutral current, and phase-specific capacity warnings. A balance spread above 20% is flagged for review.
 
 ## Offline project storage
 
-Named projects contain the BOQ and circuit diagram together, with up to ten previous snapshots retained as revisions. Projects are written to IndexedDB for larger offline-safe storage and mirrored to localStorage as a compatibility fallback. Use **Export project** and **Import project** to move a complete project between devices without a server.
+Named projects contain the BOQ, load schedule, cable-sizing inputs, and circuit diagram together, with up to ten previous snapshots retained as revisions. Loading a project or revision restores its sizing inputs and recalculates the result; students must save sizing-input edits before submitting. Projects are written to IndexedDB for larger offline-safe storage and mirrored to localStorage as a compatibility fallback. Use **Export project** and **Import project** to move a complete project between devices without a server.
 
 ## Guided learning and review
 
@@ -56,7 +59,9 @@ The Lessons module provides practical circuit exercises with hints, offline prog
 
 Offline profiles support student, instructor, and administrator roles. Saved projects can be reviewed locally, marked approved, or returned for changes; reviewer name and timestamps are stored with the project.
 
-The project workspace can export a unified engineering report containing the calculation, load schedule, BOQ, circuit, review history, and learning progress. Saved project revisions can be compared and restored to the workspace before saving. Students submit projects for review; instructors approve or request changes with comments and a resubmission history; administrators can manage the local profile/project directory. Troubleshooting attempts and completed scenarios are stored offline and included in the student progress summary.
+The project workspace can export a unified engineering report containing the calculation, load schedule, BOQ, circuit validation, review history, and learning progress. Saved project revisions can be compared and restored to the workspace before saving; comparisons include BOQ, circuit components and connections, load schedule, and review status. Students submit saved work for review; instructors approve or request changes with comments and a resubmission history; administrators can manage the local project directory. Troubleshooting attempts and completed scenarios are stored offline and included in the student progress summary.
+
+Role selection and role-based controls are local workflow conveniences only; this static offline application does not authenticate users or enforce authorization against a server. Do not use them as a security boundary for confidential student records.
 
 The circuit toolbox also includes a five-second timer relay and a manually toggled relay. Timer components begin open and close after the simulated delay; relay components can be toggled during a simulation. Troubleshooting now includes timer-start and relay-chatter diagnostics. These are training models, not safety-certified control logic.
 

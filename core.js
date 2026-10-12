@@ -16,11 +16,33 @@
   ];
 
   const deratingFactors = { clipped: 1, conduit: .8, tray: .9, ground: .7 };
+  const breakerOptions = [6, 10, 16, 20, 25, 32, 40, 50, 63, 80, 100, 125];
+  const round = (value, digits = 2) => Number(value.toFixed(digits));
 
-  function calculateLoadSizing({ phase, loadType, loadValue, pf, diversity, installMethod, cableLength = 50, ambientFactor = 1, groupingFactor = 1 }) {
-    if (!Number.isFinite(loadValue) || loadValue <= 0 || pf <= 0 || pf > 1 || diversity <= 0 || diversity > 1 ||
-      !Number.isFinite(cableLength) || cableLength <= 0 || ambientFactor <= 0 || ambientFactor > 1 || groupingFactor <= 0 || groupingFactor > 1) {
-      return { valid: false, error: 'Enter valid load, power factor, and diversity values.' };
+  function chooseCable(current, derating) {
+    const candidates = cableOptions.map(cable => {
+      const adjustedCapacity = cable.capacity * derating;
+      const breakerRating = breakerOptions.find(rating => rating >= current && rating <= adjustedCapacity);
+      return { cable, adjustedCapacity, breakerRating };
+    });
+    return candidates.find(candidate => candidate.adjustedCapacity >= current && candidate.breakerRating) ||
+      candidates.find(candidate => candidate.adjustedCapacity >= current) ||
+      candidates[candidates.length - 1];
+  }
+
+  function calculateLoadSizing(input = {}) {
+    const {
+      phase, loadType, loadValue, pf, diversity, installMethod,
+      cableLength = 50, ambientFactor = 1, groupingFactor = 1
+    } = input || {};
+    if (![1, 3].includes(phase) || !['kw', 'hp', 'amps'].includes(loadType) ||
+      !['clipped', 'conduit', 'tray', 'ground'].includes(installMethod) ||
+      !Number.isFinite(loadValue) || loadValue <= 0 || !Number.isFinite(pf) || pf <= 0 || pf > 1 ||
+      !Number.isFinite(diversity) || diversity <= 0 || diversity > 1 ||
+      !Number.isFinite(cableLength) || cableLength <= 0 ||
+      !Number.isFinite(ambientFactor) || ambientFactor <= 0 || ambientFactor > 1 ||
+      !Number.isFinite(groupingFactor) || groupingFactor <= 0 || groupingFactor > 1) {
+      return { valid: false, error: 'Enter a supported phase, load type, installation method, and valid load factors.' };
     }
     const voltage = phase === 1 ? 230 : 400;
     const powerWatts = loadType === 'kw'
@@ -33,14 +55,25 @@
       ? loadValue * diversity
       : diversifiedPower / (phase === 1 ? voltage * pf : Math.sqrt(3) * voltage * pf);
     const derating = deratingFactors[installMethod] * ambientFactor * groupingFactor;
-    const cable = cableOptions.find(item => item.capacity >= current / derating) || cableOptions.at(-1);
-    const voltageDrop = Math.round(cable.drop * current * cableLength / 1000 * 100) / 100;
+    if (!Number.isFinite(current) || !Number.isFinite(derating)) {
+      return { valid: false, error: 'The calculated load exceeds the supported numeric range.' };
+    }
+    const selection = chooseCable(current, derating);
+    const { cable, breakerRating } = selection;
+    const actualCapacity = round(selection.adjustedCapacity, 1);
+    const voltageDrop = round(cable.drop * current * cableLength / 1000);
+    if (!Number.isFinite(voltageDrop)) {
+      return { valid: false, error: 'The calculated voltage drop exceeds the supported numeric range.' };
+    }
     return {
       valid: true,
-      current: Math.round(current * 100) / 100,
+      current: round(current),
       cable,
+      breakerRating,
       voltageDrop,
-      actualCapacity: Math.round(cable.capacity * derating * 10) / 10,
+      actualCapacity,
+      withinCapacity: current <= selection.adjustedCapacity,
+      protectionCoordinated: Boolean(breakerRating),
       methodLabel: { clipped: 'Clipped direct', conduit: 'In conduit', tray: 'Cable tray', ground: 'Direct ground' }[installMethod],
       derating,
       cableLength,
@@ -49,15 +82,25 @@
     };
   }
 
-  function calculateScheduleSizing({ rows, phase, method, rcd }) {
+  function calculateScheduleSizing(input = {}) {
+    const { rows, phase, method, rcd } = input || {};
+    if (![1, 3].includes(phase) || !Object.hasOwn(deratingFactors, method) ||
+      !['recommended', 'not-required'].includes(rcd) || !Array.isArray(rows) || rows.length === 0) {
+      return { valid: false, error: 'Choose supported schedule options and add at least one load.' };
+    }
     let connected = 0;
     let demand = 0;
     let apparentDemand = 0;
     const phaseLoads = { 'phase-a': 0, 'phase-b': 0, 'phase-c': 0 };
     const phaseApparentLoads = { 'phase-a': 0, 'phase-b': 0, 'phase-c': 0 };
     for (const row of rows) {
+      if (!row || !Number.isFinite(row.load) || row.load <= 0 ||
+        !Number.isFinite(row.quantity) || row.quantity < 1 || !Number.isInteger(row.quantity) ||
+        !Number.isFinite(row.pf) || !Number.isFinite(row.diversity)) {
+        return { valid: false, error: 'Check load schedule values and power factors.' };
+      }
       const assignedPhase = row.phase || 'phase-a';
-      if (row.load < 0 || row.quantity < 1 || row.pf <= 0 || row.pf > 1 || row.diversity <= 0 || row.diversity > 1 ||
+      if (row.pf <= 0 || row.pf > 1 || row.diversity <= 0 || row.diversity > 1 ||
         (phase === 3 && !Object.hasOwn(phaseLoads, assignedPhase))) {
         return { valid: false, error: 'Check load schedule values and power factors.' };
       }
@@ -68,13 +111,18 @@
       apparentDemand += rowApparentDemand;
       phaseLoads[assignedPhase] += rowDemand;
       phaseApparentLoads[assignedPhase] += rowApparentDemand;
+      if (![connected, demand, apparentDemand, phaseLoads[assignedPhase], phaseApparentLoads[assignedPhase]].every(Number.isFinite)) {
+        return { valid: false, error: 'The load schedule exceeds the supported numeric range.' };
+      }
     }
-    if (!Number.isFinite(connected)) return { valid: false, error: 'Check load schedule values and power factors.' };
     const voltage = phase === 3 ? 400 : 230;
     const current = apparentDemand * 1000 / (phase === 3 ? Math.sqrt(3) * voltage : voltage);
     const derating = deratingFactors[method];
-    const cable = cableOptions.find(option => option.capacity * derating >= current) || cableOptions.at(-1);
-    const coordinationOk = cable.breaker >= current && cable.breaker <= cable.capacity * derating;
+    if (!Number.isFinite(current)) return { valid: false, error: 'The calculated schedule current exceeds the supported numeric range.' };
+    const selection = chooseCable(current, derating);
+    const { cable, breakerRating } = selection;
+    const withinCapacity = current <= selection.adjustedCapacity;
+    const coordinationOk = withinCapacity && Boolean(breakerRating);
     const phaseCurrents = Object.fromEntries(Object.entries(phaseApparentLoads).map(([name, load]) => [name, load * 1000 / 230]));
     const activePhaseCurrents = phase === 3 ? Object.values(phaseCurrents) : [current];
     const highestPhaseCurrent = Math.max(...activePhaseCurrents);
@@ -96,14 +144,16 @@
       demand,
       current,
       cable,
-      deratedCapacity: cable.capacity * derating,
+      breakerRating,
+      deratedCapacity: selection.adjustedCapacity,
+      withinCapacity,
       coordinationOk,
       rcdRecommended: rcd === 'recommended',
       needsReview: current > 125 || !coordinationOk || cable === cableOptions.at(-1) || balancePercent > 20 || phaseWarnings.length > 0,
       phaseLoads,
       phaseCurrents,
-      neutralCurrent: Math.round(neutralCurrent * 100) / 100,
-      balancePercent: Math.round(balancePercent * 100) / 100,
+      neutralCurrent: round(neutralCurrent),
+      balancePercent: round(balancePercent),
       phaseWarnings
     };
   }

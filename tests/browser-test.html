@@ -8,24 +8,100 @@
 <body>
   <h1>Browser tests</h1>
   <ul id="results"></ul>
-  <script src="../core.js?v=20260911-0817"></script>
-  <iframe id="app" src="../index.html?v=20260911-0817" hidden title="application under test"></iframe>
+  <script src="../core.js?v=20261012-1223"></script>
+  <iframe id="app" src="../index.html?browser-test=1&v=20261012-1223" hidden title="application under test"></iframe>
   <script>
     const results = document.querySelector('#results');
     const tests = [
       ['valid load sizing', () => DangoteAcademyCore.calculateLoadSizing({ phase: 1, loadType: 'kw', loadValue: 10, pf: .85, diversity: .8, installMethod: 'conduit' }).valid],
+      ['dashboard reports local data and safely escapes project names', () => {
+        const app = testApp();
+        const keys = ['dangote-academy-projects', 'dangote-academy-lessons', 'dangote-academy-troubleshooting'];
+        const previous = keys.map(key => app.localStorage.getItem(key));
+        try {
+          app.localStorage.setItem(keys[0], JSON.stringify([{
+            name: '<img src=x onerror=alert(1)>',
+            savedAt: new Date().toISOString(),
+            status: 'draft'
+          }]));
+          app.localStorage.setItem(keys[1], JSON.stringify({ 'safe-topology': { completedAt: new Date().toISOString() } }));
+          app.localStorage.setItem(keys[2], JSON.stringify({ 'scenario-0': { completed: true, attempts: 2, completedAt: new Date().toISOString() } }));
+          app.renderDashboard();
+          const activity = app.document.querySelector('#dashboard-activity');
+          return app.document.querySelector('#dashboard-project-count').textContent === '1' &&
+            app.document.querySelector('#dashboard-lesson-count').textContent === '1 / 3' &&
+            app.document.querySelector('#dashboard-scenario-count').textContent === '1 / 5' &&
+            activity.querySelectorAll('img').length === 0 &&
+            activity.textContent.includes('<img src=x onerror=alert(1)>') &&
+            !activity.textContent.includes('John Doe');
+        } finally {
+          keys.forEach((key, index) => {
+            if (previous[index] === null) app.localStorage.removeItem(key);
+            else app.localStorage.setItem(key, previous[index]);
+          });
+          app.renderDashboard();
+        }
+      }],
       ['invalid power factor rejected', () => !DangoteAcademyCore.calculateLoadSizing({ phase: 1, loadType: 'kw', loadValue: 10, pf: 1.2, diversity: .8, installMethod: 'clipped' }).valid],
       ['schedule demand calculated', () => DangoteAcademyCore.calculateScheduleSizing({ phase: 1, method: 'clipped', rcd: 'recommended', rows: [{ load: 1.2, quantity: 1, pf: .95, diversity: .8 }] }).demand === .96],
-      ['correction factors change cable selection', () => DangoteAcademyCore.calculateLoadSizing({ phase: 1, loadType: 'kw', loadValue: 10, pf: .85, diversity: .8, installMethod: 'conduit', cableLength: 75, ambientFactor: .94, groupingFactor: .8 }).cable.size === 16],
+      ['correction factors change cable selection', () => DangoteAcademyCore.calculateLoadSizing({ phase: 1, loadType: 'kw', loadValue: 10, pf: .85, diversity: .8, installMethod: 'conduit', cableLength: 75, ambientFactor: .94, groupingFactor: .8 }).cable.size === 25],
+      ['selected breaker rating is coordinated to derated cable capacity', () => {
+        const result = DangoteAcademyCore.calculateLoadSizing({ phase: 1, loadType: 'kw', loadValue: 10, pf: .85, diversity: .8, installMethod: 'conduit' });
+        return result.protectionCoordinated && result.breakerRating >= result.current &&
+          result.breakerRating <= result.actualCapacity;
+      }],
       ['invalid cable length rejected', () => !DangoteAcademyCore.calculateLoadSizing({ phase: 1, loadType: 'kw', loadValue: 10, pf: .85, diversity: .8, installMethod: 'conduit', cableLength: 0 }).valid],
       ['three-phase voltage applied', () => DangoteAcademyCore.calculateLoadSizing({ phase: 3, loadType: 'kw', loadValue: 15, pf: .9, diversity: 1, installMethod: 'tray' }).voltage === 400],
       ['three-phase current calculated', () => DangoteAcademyCore.calculateLoadSizing({ phase: 3, loadType: 'kw', loadValue: 15, pf: .9, diversity: 1, installMethod: 'tray' }).current === 24.06],
+      ['load sizing rejects unsupported and non-finite inputs', () =>
+        !DangoteAcademyCore.calculateLoadSizing({ phase: 2, loadType: 'kw', loadValue: 10, pf: .9, diversity: 1, installMethod: 'tray' }).valid &&
+        !DangoteAcademyCore.calculateLoadSizing({ phase: 1, loadType: 'kw', loadValue: Infinity, pf: .9, diversity: 1, installMethod: 'tray' }).valid],
+      ['load sizing rejects finite inputs with overflowing derived values', () =>
+        !DangoteAcademyCore.calculateLoadSizing({ phase: 1, loadType: 'kw', loadValue: Number.MAX_VALUE, pf: 1, diversity: 1, installMethod: 'tray' }).valid],
+      ['load sizing flags demand beyond the cable table', () => {
+        const result = DangoteAcademyCore.calculateLoadSizing({ phase: 3, loadType: 'kw', loadValue: 2000, pf: .9, diversity: 1, installMethod: 'clipped' });
+        return result.valid && result.withinCapacity === false;
+      }],
+      ['schedule rejects empty and invalid rows', () =>
+        !DangoteAcademyCore.calculateScheduleSizing({ phase: 1, method: 'clipped', rcd: 'recommended', rows: [] }).valid &&
+        !DangoteAcademyCore.calculateScheduleSizing({ phase: 1, method: 'clipped', rcd: 'recommended', rows: [{ load: NaN, quantity: 1, pf: .9, diversity: 1 }] }).valid],
+      ['schedule rejects overflowing aggregate values', () =>
+        !DangoteAcademyCore.calculateScheduleSizing({ phase: 1, method: 'clipped', rcd: 'recommended', rows: [{ load: Number.MAX_VALUE, quantity: 1, pf: .01, diversity: 1 }] }).valid],
       ['linear circuit validates', () => {
         const app = testApp();
         loadCircuit(app, ['source-ac', 'mcb', 'lamp'], [
           connection('source', 'mcb', 'line'), connection('mcb', 'lamp', 'line')
         ]);
         return app.validateCircuit() && app.document.querySelector('#circuit-message').textContent.includes('complete');
+      }],
+      ['circuit validation requires exactly one source', () => {
+        const app = testApp();
+        loadCircuit(app, ['source-ac', 'battery', 'mcb', 'lamp'], [
+          connection('source', 'mcb', 'line'),
+          connection('mcb', 'lamp', 'line'),
+          { ...connection('battery', 'lamp', 'line'), toTerminal: 'out' }
+        ]);
+        return !app.validateCircuit() &&
+          app.document.querySelector('#circuit-message').textContent.includes('one source');
+      }],
+      ['circuit validation rejects protection outside the line path', () => {
+        const app = testApp();
+        loadCircuit(app, ['source-ac', 'mcb', 'lamp'], [
+          connection('source', 'lamp', 'line'),
+          connection('source', 'mcb', 'neutral')
+        ]);
+        return !app.validateCircuit() &&
+          app.document.querySelector('#circuit-message').textContent.includes('line / phase path');
+      }],
+      ['circuit validation rejects disconnected components despite extra wiring', () => {
+        const app = testApp();
+        loadCircuit(app, ['source-ac', 'mcb', 'lamp', 'relay'], [
+          connection('source', 'mcb', 'line'),
+          connection('mcb', 'lamp', 'line'),
+          { ...connection('lamp', 'source', 'line'), fromTerminal: 'out', toTerminal: 'out' }
+        ]);
+        return !app.validateCircuit() &&
+          app.document.querySelector('#circuit-message').textContent.includes('every component');
       }],
       ['junction branching validates both branches', () => {
         const app = testApp();
@@ -128,15 +204,29 @@
         try { app.restoreCircuit(invalid); } catch (error) { rejected = error.message.includes('conductor'); }
         return rejected && app.serialiseCircuit().components.length === before;
       }],
+      ['malformed circuit import is rejected before changing the workspace', () => {
+        const app = testApp();
+        loadCircuit(app, ['source-ac', 'lamp'], [connection('source', 'lamp')]);
+        const before = JSON.stringify(app.serialiseCircuit());
+        const invalid = app.serialiseCircuit();
+        invalid.components[1].type = 'unknown-component';
+        let rejected = false;
+        try { app.restoreCircuit(invalid); } catch (error) { rejected = error.message.includes('component'); }
+        return rejected && JSON.stringify(app.serialiseCircuit()) === before;
+      }],
       ['duplicate destination terminals are rejected', () => {
         const app = testApp();
-        loadCircuit(app, ['source-ac', 'mcb', 'junction', 'lamp', 'socket'], [
+        loadCircuit(app, ['source-ac', 'mcb', 'junction', 'lamp'], [
           connection('source', 'mcb', 'line'),
           connection('mcb', 'junction', 'line'),
-          { ...connection('junction', 'lamp', 'line'), fromTerminal: 'branch-a' },
-          { ...connection('junction', 'lamp', 'line'), fromTerminal: 'branch-b' }
+          { ...connection('junction', 'lamp', 'line'), fromTerminal: 'branch-a' }
         ]);
-        return !app.validateCircuit() && app.document.querySelector('#circuit-message').textContent.includes('duplicate');
+        const before = JSON.stringify(app.serialiseCircuit());
+        const invalid = app.serialiseCircuit();
+        invalid.connections.push({ ...invalid.connections[2], fromTerminal: 'branch-b' });
+        let rejected = false;
+        try { app.restoreCircuit(invalid); } catch (error) { rejected = error.message.includes('Duplicate destination'); }
+        return rejected && JSON.stringify(app.serialiseCircuit()) === before;
       }],
       ['projects persist BOQ, circuit, and revisions', () => {
         const app = testApp();
@@ -149,6 +239,58 @@
         const savedProject = saved.find(project => project.name === 'Browser project');
         return savedProject && savedProject.circuit.version === 2 &&
           savedProject.circuit.connections[0].conductor === 'phase-c' && Array.isArray(savedProject.revisions);
+      }],
+      ['projects persist and restore load sizing inputs with revisions', () => {
+        const app = testApp();
+        const name = `Sizing inputs ${Date.now()}`;
+        app.restoreLoadSizingInputs({
+          phase: 1, loadType: 'kw', loadValue: '2', pf: '.9', diversity: '.8',
+          cableLength: '75', ambientFactor: .94, groupingFactor: .8, installMethod: 'conduit'
+        });
+        const numericFactorsRestored = app.getLoadSizingInputs().ambientFactor === '.94' &&
+          app.getLoadSizingInputs().groupingFactor === '.8';
+        const setInputs = length => {
+          app.document.querySelector('#calc-phase').value = '1';
+          app.document.querySelector('#calc-load-type').value = 'kw';
+          app.document.querySelector('#calc-load-value').value = '2';
+          app.document.querySelector('#calc-pf').value = '.9';
+          app.document.querySelector('#calc-diversity').value = '.8';
+          app.document.querySelector('#calc-length').value = String(length);
+          app.document.querySelector('#calc-ambient').value = '.94';
+          app.document.querySelector('#calc-grouping').value = '.8';
+          app.document.querySelector('#calc-install-method').value = 'conduit';
+          app.calculateLoad({ preventDefault() {} });
+        };
+        setInputs(75);
+        app.document.querySelector('#project-name').value = name;
+        app.saveNamedProject();
+        const first = JSON.parse(app.localStorage.getItem('dangote-academy-projects')).find(project => project.name === name);
+        setInputs(90);
+        app.saveNamedProject();
+        const saved = JSON.parse(app.localStorage.getItem('dangote-academy-projects')).find(project => project.name === name);
+        app.document.querySelector('#project-list').value = name;
+        app.renderRevisionControls(name);
+        app.document.querySelector('#project-revision-list').value = '0';
+        const comparison = app.compareProjectRevisions();
+        app.restoreProjectRevision();
+        return numericFactorsRestored && first.calculationInputs.cableLength === '75' && first.calculation &&
+          saved.calculationInputs.cableLength === '90' && comparison.calculationChanged &&
+          app.getLoadSizingInputs().cableLength === '75' &&
+          app.document.querySelector('#add-to-boq').disabled === false;
+      }],
+      ['project submission requires saved load sizing inputs', () => {
+        const app = testApp();
+        app.document.querySelector('#profile-role').value = 'student';
+        app.saveProfile();
+        const name = `Fresh sizing submission ${Date.now()}`;
+        app.document.querySelector('#project-name').value = name;
+        app.saveNamedProject();
+        const length = app.document.querySelector('#calc-length');
+        length.value = '60';
+        length.dispatchEvent(new app.Event('input', { bubbles: true }));
+        const submitted = app.submitNamedProject();
+        const saved = JSON.parse(app.localStorage.getItem('dangote-academy-projects')).find(project => project.name === name);
+        return submitted === false && saved.status === 'draft';
       }],
       ['guided lessons record completed progress', () => {
         const app = testApp();
@@ -170,35 +312,45 @@
         ]);
         app.document.querySelector('#project-name').value = 'Review project';
         app.saveNamedProject();
+        app.submitNamedProject();
+        app.document.querySelector('#profile-role').value = 'instructor';
+        app.saveProfile();
         app.updateProjectReviewStatus('Review project', 'approved');
         const profile = JSON.parse(app.localStorage.getItem('dangote-academy-profile'));
         const projects = JSON.parse(app.localStorage.getItem('dangote-academy-projects'));
         const reviewed = projects.find(project => project.name === 'Review project');
-        return profile.name === 'Ada Student' && profile.role === 'student' && reviewed.status === 'approved';
+        return profile.name === 'Ada Student' && reviewed.owner.role === 'student' && reviewed.status === 'approved';
       }],
       ['unified engineering report includes project and progress sections', () => {
         const app = testApp();
         const report = app.buildEngineeringReport();
         return report.schemaVersion === 1 && report.reportType === 'unified-engineering-report' &&
           Array.isArray(report.project.boq) && report.project.circuit.version === 2 &&
+          report.project.scheduleInputs.rows.length > 0 && report.project.scheduleValidation.valid &&
           report.learning.progress && Number.isInteger(report.learning.progress.attempts);
       }],
       ['revision comparison and restore return saved workspace state', () => {
         const app = testApp();
-        app.document.querySelector('#project-name').value = 'Revision browser project';
+        const projectName = `Revision browser project ${Date.now()}`;
+        app.document.querySelector('#project-name').value = projectName;
+        app.document.querySelector('.schedule-load').value = '2.5';
         loadCircuit(app, ['source-ac', 'mcb', 'lamp'], [
           connection('source', 'mcb', 'line'), connection('mcb', 'lamp', 'line')
         ]);
         app.saveNamedProject();
         app.createComponent('socket', 400, 20);
+        app.document.querySelector('.schedule-load').value = '6';
         app.saveNamedProject();
-        const saved = JSON.parse(app.localStorage.getItem('dangote-academy-projects')).find(project => project.name === 'Revision browser project');
+        const saved = JSON.parse(app.localStorage.getItem('dangote-academy-projects')).find(project => project.name === projectName);
         app.document.querySelector('#project-list').value = saved.name;
         app.renderRevisionControls(saved.name);
         app.document.querySelector('#project-revision-list').value = '0';
         const comparison = app.compareProjectRevisions();
         app.restoreProjectRevision();
-        return comparison && comparison.revision === 0 && comparison.circuitChanged && app.serialiseCircuit().components.length === 3;
+        return comparison && comparison.revision === 0 && comparison.circuitChanged &&
+          comparison.scheduleChanged && comparison.connections === '2 → 2' &&
+          app.serialiseCircuit().components.length === 3 &&
+          app.getLoadScheduleSnapshot().rows[0].load === '2.5';
       }],
       ['troubleshooting attempts and completed scenarios persist', () => {
         const app = testApp();
@@ -215,17 +367,22 @@
         const app = testApp();
         app.document.querySelector('#profile-role').value = 'student';
         app.saveProfile();
-        app.document.querySelector('#project-name').value = 'Submission browser project';
+        const projectName = `Submission browser project ${Date.now()}`;
+        app.document.querySelector('#project-name').value = projectName;
         loadCircuit(app, ['source-ac', 'mcb', 'lamp'], [
           connection('source', 'mcb', 'line'), connection('mcb', 'lamp', 'line')
         ]);
         app.saveNamedProject();
         app.submitNamedProject();
-        let project = JSON.parse(app.localStorage.getItem('dangote-academy-projects')).find(item => item.name === 'Submission browser project');
+        let project = JSON.parse(app.localStorage.getItem('dangote-academy-projects')).find(item => item.name === projectName);
         const submitted = project.status === 'submitted' && project.reviewHistory.some(event => event.action === 'Submitted');
+        app.document.querySelector('#profile-role').value = 'instructor';
+        app.saveProfile();
         app.updateProjectReviewStatus(project.name, 'changes-requested');
+        app.document.querySelector('#profile-role').value = 'student';
+        app.saveProfile();
         app.submitNamedProject();
-        project = JSON.parse(app.localStorage.getItem('dangote-academy-projects')).find(item => item.name === 'Submission browser project');
+        project = JSON.parse(app.localStorage.getItem('dangote-academy-projects')).find(item => item.name === projectName);
         return submitted && project.status === 'submitted' && project.resubmissionCount === 1 && project.reviewHistory.some(event => event.action === 'Resubmitted');
       }],
       ['role-aware controls expose student and instructor workflows', () => {
@@ -239,6 +396,50 @@
         const instructorReviewVisible = !app.document.querySelector('#review-projects [data-role]').hidden;
         return studentSubmitVisible && studentReviewHidden && instructorReviewVisible;
       }],
+      ['students cannot approve submitted projects', () => {
+        const app = testApp();
+        app.document.querySelector('#profile-role').value = 'student';
+        app.saveProfile();
+        app.document.querySelector('#project-name').value = 'Unauthorized review project';
+        loadCircuit(app, ['source-ac', 'mcb', 'lamp'], [
+          connection('source', 'mcb'), connection('mcb', 'lamp')
+        ]);
+        app.saveNamedProject();
+        app.submitNamedProject();
+        const before = JSON.parse(app.localStorage.getItem('dangote-academy-projects')).find(item => item.name === 'Unauthorized review project');
+        app.updateProjectReviewStatus(before.name, 'approved');
+        const after = JSON.parse(app.localStorage.getItem('dangote-academy-projects')).find(item => item.name === before.name);
+        return before.status === 'submitted' && after.status === 'submitted';
+      }],
+      ['submissions require the latest schedule to be saved', () => {
+        const app = testApp();
+        app.document.querySelector('#profile-role').value = 'student';
+        app.saveProfile();
+        const name = `Fresh submission ${Date.now()}`;
+        app.document.querySelector('#project-name').value = name;
+        app.saveNamedProject();
+        app.document.querySelector('.schedule-load').value = '99';
+        const submitted = app.submitNamedProject();
+        const project = JSON.parse(app.localStorage.getItem('dangote-academy-projects')).find(item => item.name === name);
+        return submitted === false && project.status === 'draft';
+      }],
+      ['edits to approved projects invalidate approval and create a revision', () => {
+        const app = testApp();
+        app.document.querySelector('#profile-role').value = 'student';
+        app.saveProfile();
+        const name = `Reapproval workflow ${Date.now()}`;
+        app.document.querySelector('#project-name').value = name;
+        app.saveNamedProject();
+        app.submitNamedProject();
+        app.document.querySelector('#profile-role').value = 'instructor';
+        app.saveProfile();
+        app.updateProjectReviewStatus(name, 'approved');
+        app.document.querySelector('.schedule-load').value = '8';
+        app.saveNamedProject();
+        const project = JSON.parse(app.localStorage.getItem('dangote-academy-projects')).find(item => item.name === name);
+        return project.status === 'draft' && project.revisions.length === 1 &&
+          project.reviewHistory.some(event => event.action.includes('returned to draft'));
+      }],
       ['timer and relay components support control states', () => {
         const app = testApp();
         const before = app.document.querySelectorAll('.circuit-component').length;
@@ -251,6 +452,39 @@
         const toggled = relay.dataset.state === 'on';
         const saved = app.serialiseCircuit().components.some(component => component.type === 'timer');
         return initial && toggled && saved;
+      }],
+      ['timer closes at zero and powers a valid circuit', () => {
+        const app = testApp();
+        loadCircuit(app, ['source-ac', 'mcb', 'timer', 'lamp'], [
+          connection('source', 'mcb'), connection('mcb', 'timer'), connection('timer', 'lamp')
+        ]);
+        if (!app.document.querySelector('#simulate-circuit').textContent.includes('Run simulation')) app.toggleSimulation();
+        let tick;
+        const originalSetInterval = app.setInterval;
+        const originalClearInterval = app.clearInterval;
+        app.setInterval = callback => { tick = callback; return 1; };
+        app.clearInterval = () => {};
+        try {
+          app.toggleSimulation();
+          for (let second = 0; second < 6; second += 1) tick();
+          const components = [...app.document.querySelectorAll('.circuit-component')];
+          const timer = components.find(item => item.dataset.type === 'timer');
+          const lamp = components.find(item => item.dataset.type === 'lamp');
+          const passed = timer?.dataset.state === 'on' && timer.dataset.timerSeconds === '0' &&
+            lamp?.dataset.powered === 'true';
+          app.toggleSimulation();
+          if (!passed) throw new Error(JSON.stringify({
+            timerState: timer?.dataset.state,
+            timerSeconds: timer?.dataset.timerSeconds,
+            lampPowered: lamp?.dataset.powered,
+            circuitStatus: app.document.querySelector('#circuit-validation').textContent,
+            components: components.map(item => item.dataset.type)
+          }));
+          return passed;
+        } finally {
+          app.setInterval = originalSetInterval;
+          app.clearInterval = originalClearInterval;
+        }
       }],
       ['troubleshooting includes timer and relay diagnostics', () => {
         const app = testApp();
@@ -274,18 +508,34 @@
       });
     }
     function runTests() {
+      const app = testApp();
+      const originalStorage = snapshotStorage(app.localStorage);
       tests.forEach(([name, run]) => {
-      const item = document.createElement('li');
-      try {
-        if (!run()) throw new Error('assertion failed');
-        item.className = 'pass';
-        item.textContent = `PASS: ${name}`;
-      } catch (error) {
-        item.className = 'fail';
-        item.textContent = `FAIL: ${name} (${error.message})`;
-      }
-      results.appendChild(item);
+        restoreStorage(app.localStorage, originalStorage);
+        const item = document.createElement('li');
+        try {
+          if (!run()) throw new Error('assertion failed');
+          item.className = 'pass';
+          item.textContent = `PASS: ${name}`;
+        } catch (error) {
+          item.className = 'fail';
+          item.textContent = `FAIL: ${name} (${error.message})`;
+        } finally {
+          restoreStorage(app.localStorage, originalStorage);
+        }
+        results.appendChild(item);
       });
+      app.location.reload();
+    }
+    function snapshotStorage(storage) {
+      return Array.from({ length: storage.length }, (_, index) => {
+        const key = storage.key(index);
+        return [key, storage.getItem(key)];
+      });
+    }
+    function restoreStorage(storage, snapshot) {
+      storage.clear();
+      snapshot.forEach(([key, value]) => storage.setItem(key, value));
     }
     document.querySelector('#app').addEventListener('load', runTests, { once: true });
   </script>

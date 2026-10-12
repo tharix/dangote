@@ -7,14 +7,49 @@ test('selects a derated cable for a single-phase load', () => {
     phase: 1, loadType: 'kw', loadValue: 10, pf: .85, diversity: .8, installMethod: 'conduit'
   });
   assert.equal(result.valid, true);
-  assert.equal(result.cable.size, 10);
-  assert.equal(result.actualCapacity, 45.6);
+  assert.equal(result.cable.size, 16);
+  assert.equal(result.actualCapacity, 60.8);
   assert.equal(result.current, 40.92);
+  assert.equal(result.breakerRating, 50);
+  assert.equal(result.protectionCoordinated, true);
 });
 
 test('rejects invalid load factors', () => {
   const result = calculateLoadSizing({
     phase: 1, loadType: 'kw', loadValue: 10, pf: 1.2, diversity: .8, installMethod: 'clipped'
+  });
+  assert.equal(result.valid, false);
+});
+
+test('rejects unsupported phase, load type, and installation method', () => {
+  for (const input of [
+    { phase: 2, loadType: 'kw', installMethod: 'clipped' },
+    { phase: 1, loadType: 'watts', installMethod: 'clipped' },
+    { phase: 1, loadType: 'kw', installMethod: 'unknown' }
+  ]) {
+    const result = calculateLoadSizing({
+      phase: 1, loadType: 'kw', loadValue: 1, pf: .9, diversity: 1, installMethod: 'clipped',
+      ...input
+    });
+    assert.equal(result.valid, false);
+  }
+});
+
+test('rejects non-finite input and reports demand above available cable capacity', () => {
+  assert.equal(calculateLoadSizing({
+    phase: 1, loadType: 'kw', loadValue: Infinity, pf: .9, diversity: 1, installMethod: 'clipped'
+  }).valid, false);
+  const result = calculateLoadSizing({
+    phase: 3, loadType: 'kw', loadValue: 2000, pf: .9, diversity: 1, installMethod: 'clipped'
+  });
+  assert.equal(result.valid, true);
+  assert.equal(result.withinCapacity, false);
+});
+
+test('rejects finite load inputs whose derived values overflow', () => {
+  const result = calculateLoadSizing({
+    phase: 1, loadType: 'kw', loadValue: Number.MAX_VALUE, pf: 1, diversity: 1,
+    installMethod: 'clipped'
   });
   assert.equal(result.valid, false);
 });
@@ -25,7 +60,7 @@ test('accounts for cable length and correction factors', () => {
     installMethod: 'conduit', cableLength: 75, ambientFactor: .94, groupingFactor: .8
   });
   assert.equal(result.valid, true);
-  assert.equal(result.cable.size, 16);
+  assert.equal(result.cable.size, 25);
   assert.equal(result.derating, .6016);
   assert.equal(result.cableLength, 75);
   assert.equal(result.voltageDropPercent > 0, true);
@@ -97,6 +132,24 @@ test('rejects unsupported phase assignment', () => {
   const result = calculateScheduleSizing({
     phase: 3, method: 'clipped', rcd: 'recommended',
     rows: [{ load: 1, quantity: 1, pf: .9, diversity: 1, phase: 'neutral' }]
+  });
+  assert.equal(result.valid, false);
+});
+
+test('rejects empty or malformed schedules', () => {
+  assert.equal(calculateScheduleSizing({
+    phase: 1, method: 'clipped', rcd: 'recommended', rows: []
+  }).valid, false);
+  assert.equal(calculateScheduleSizing({
+    phase: 1, method: 'clipped', rcd: 'recommended',
+    rows: [{ load: NaN, quantity: 1, pf: .9, diversity: 1 }]
+  }).valid, false);
+});
+
+test('rejects schedules whose aggregate demand overflows', () => {
+  const result = calculateScheduleSizing({
+    phase: 1, method: 'clipped', rcd: 'recommended',
+    rows: [{ load: Number.MAX_VALUE, quantity: 1, pf: .01, diversity: 1 }]
   });
   assert.equal(result.valid, false);
 });
