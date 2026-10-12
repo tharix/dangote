@@ -176,6 +176,69 @@
         const reviewed = projects.find(project => project.name === 'Review project');
         return profile.name === 'Ada Student' && profile.role === 'student' && reviewed.status === 'approved';
       }],
+      ['unified engineering report includes project and progress sections', () => {
+        const app = testApp();
+        const report = app.buildEngineeringReport();
+        return report.schemaVersion === 1 && report.reportType === 'unified-engineering-report' &&
+          Array.isArray(report.project.boq) && report.project.circuit.version === 2 &&
+          report.learning.progress && Number.isInteger(report.learning.progress.attempts);
+      }],
+      ['revision comparison and restore return saved workspace state', () => {
+        const app = testApp();
+        app.document.querySelector('#project-name').value = 'Revision browser project';
+        loadCircuit(app, ['source-ac', 'mcb', 'lamp'], [
+          connection('source', 'mcb', 'line'), connection('mcb', 'lamp', 'line')
+        ]);
+        app.saveNamedProject();
+        app.createComponent('socket', 400, 20);
+        app.saveNamedProject();
+        const saved = JSON.parse(app.localStorage.getItem('dangote-academy-projects')).find(project => project.name === 'Revision browser project');
+        app.document.querySelector('#project-list').value = saved.name;
+        app.renderRevisionControls(saved.name);
+        app.document.querySelector('#project-revision-list').value = '0';
+        const comparison = app.compareProjectRevisions();
+        app.restoreProjectRevision();
+        return comparison && comparison.revision === 0 && comparison.circuitChanged && app.serialiseCircuit().components.length === 3;
+      }],
+      ['troubleshooting attempts and completed scenarios persist', () => {
+        const app = testApp();
+        app.localStorage.removeItem('dangote-academy-troubleshooting');
+        app.renderTroubleshooting();
+        const card = app.document.querySelector('.scenario-card');
+        const option = card.querySelector('.scenario-option[data-answer="0"]');
+        option.dispatchEvent(new app.MouseEvent('click', { bubbles: true }));
+        const progress = JSON.parse(app.localStorage.getItem('dangote-academy-troubleshooting'));
+        return progress['scenario-0'].attempts === 1 && progress['scenario-0'].completed &&
+          app.document.querySelector('#student-progress-summary').textContent.includes('Scenarios');
+      }],
+      ['student submission records review history and resubmission count', () => {
+        const app = testApp();
+        app.document.querySelector('#profile-role').value = 'student';
+        app.saveProfile();
+        app.document.querySelector('#project-name').value = 'Submission browser project';
+        loadCircuit(app, ['source-ac', 'mcb', 'lamp'], [
+          connection('source', 'mcb', 'line'), connection('mcb', 'lamp', 'line')
+        ]);
+        app.saveNamedProject();
+        app.submitNamedProject();
+        let project = JSON.parse(app.localStorage.getItem('dangote-academy-projects')).find(item => item.name === 'Submission browser project');
+        const submitted = project.status === 'submitted' && project.reviewHistory.some(event => event.action === 'Submitted');
+        app.updateProjectReviewStatus(project.name, 'changes-requested');
+        app.submitNamedProject();
+        project = JSON.parse(app.localStorage.getItem('dangote-academy-projects')).find(item => item.name === 'Submission browser project');
+        return submitted && project.status === 'submitted' && project.resubmissionCount === 1 && project.reviewHistory.some(event => event.action === 'Resubmitted');
+      }],
+      ['role-aware controls expose student and instructor workflows', () => {
+        const app = testApp();
+        app.document.querySelector('#profile-role').value = 'student';
+        app.saveProfile();
+        const studentSubmitVisible = !app.document.querySelector('#submit-project').hidden;
+        const studentReviewHidden = app.document.querySelector('#review-projects [data-role]').hidden;
+        app.document.querySelector('#profile-role').value = 'instructor';
+        app.saveProfile();
+        const instructorReviewVisible = !app.document.querySelector('#review-projects [data-role]').hidden;
+        return studentSubmitVisible && studentReviewHidden && instructorReviewVisible;
+      }],
       ['timer and relay components support control states', () => {
         const app = testApp();
         const before = app.document.querySelectorAll('.circuit-component').length;

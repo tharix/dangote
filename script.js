@@ -24,6 +24,7 @@ let circuitFault = 'none';
 let circuitHistory = [];
 let circuitRedo = [];
 let restoringCircuit = false;
+let lastScheduleResult = null;
 const phaseConductors = ['line', 'phase-a', 'phase-b', 'phase-c'];
 const conductorTypes = [...phaseConductors, 'neutral', 'earth'];
 const projectDatabaseName = 'dangote-academy-projects';
@@ -51,6 +52,8 @@ const guidedLessons = [
   { id: 'fault-response', title: 'Diagnose an earth-leakage fault', objective: 'Enable earth leakage and verify that an RCD and earth path are present.', hint: 'Build a circuit with an RCD and an earth conductor, then select Earth leakage.', check: () => $('#circuit-fault')?.value === 'earth-leakage' && validateCircuit() }
 ];
 const profileStorageKey = 'dangote-academy-profile';
+const profileDirectoryKey = 'dangote-academy-profiles';
+const troubleshootingStorageKey = 'dangote-academy-troubleshooting';
 
 const $ = (selector, parent = document) => parent.querySelector(selector);
 const $$ = (selector, parent = document) => [...parent.querySelectorAll(selector)];
@@ -89,24 +92,150 @@ function saveProfile() {
     role: $('#profile-role').value
   };
   localStorage.setItem(profileStorageKey, JSON.stringify(profile));
+  const profiles = getStoredProfiles().filter(item => profile.studentId
+    ? item.studentId !== profile.studentId
+    : item.name !== profile.name);
+  profiles.push({ ...profile, updatedAt: new Date().toISOString() });
+  localStorage.setItem(profileDirectoryKey, JSON.stringify(profiles.slice(-100)));
   $('#profile-name-display').textContent = profile.name;
   $('#profile-role-display').textContent = `${profile.role[0].toUpperCase()}${profile.role.slice(1)} role`;
+  applyRoleControls();
+  renderReview();
+  renderAdminTools();
   showToast('Offline profile saved.');
+}
+
+function getStoredProfiles() {
+  try {
+    const profiles = JSON.parse(localStorage.getItem(profileDirectoryKey) || '[]');
+    return Array.isArray(profiles) ? profiles : [];
+  } catch {
+    return [];
+  }
+}
+
+function getRole() {
+  return getProfile().role || 'student';
+}
+
+function canReviewProjects() {
+  return ['instructor', 'administrator'].includes(getRole());
+}
+
+function canManageWorkspace() {
+  return getRole() === 'administrator';
+}
+
+function applyRoleControls() {
+  $$('[data-role]').forEach(control => {
+    const roles = control.dataset.role.split(',').map(role => role.trim());
+    control.hidden = !roles.includes(getRole());
+  });
+  $$('[data-student-only]').forEach(control => { control.hidden = getRole() !== 'student'; });
+  const roleHint = $('#role-control-hint');
+  if (roleHint) roleHint.textContent = getRole() === 'student'
+    ? 'Students can save and submit projects for instructor review.'
+    : getRole() === 'administrator'
+      ? 'Administrators can manage local profiles and project records.'
+      : 'Instructors can review submissions and return them for changes.';
+}
+
+function getTroubleshootingProgress() {
+  try {
+    const progress = JSON.parse(localStorage.getItem(troubleshootingStorageKey) || '{}');
+    return progress && typeof progress === 'object' ? progress : {};
+  } catch {
+    return {};
+  }
+}
+
+function getStudentProgressSummary() {
+  const lessons = getLessonProgress();
+  const troubleshooting = getTroubleshootingProgress();
+  const projects = getSavedProjects();
+  return {
+    lessonsCompleted: guidedLessons.filter(lesson => lessons[lesson.id]).length,
+    lessonsTotal: guidedLessons.length,
+    scenariosCompleted: troubleshootingScenarios.filter((scenario, index) => troubleshooting[scenario.id || `scenario-${index}`]?.completed).length,
+    scenariosTotal: troubleshootingScenarios.length,
+    attempts: troubleshootingScenarios.reduce((total, scenario, index) => total + (troubleshooting[scenario.id || `scenario-${index}`]?.attempts || 0), 0),
+    projectsSubmitted: projects.filter(project => ['submitted', 'approved', 'changes-requested'].includes(project.status)).length,
+    projectsApproved: projects.filter(project => project.status === 'approved').length
+  };
+}
+
+function renderStudentProgressSummary() {
+  const summary = getStudentProgressSummary();
+  const target = $('#student-progress-summary');
+  if (target) target.innerHTML = `<span>Lessons <b>${summary.lessonsCompleted}/${summary.lessonsTotal}</b></span><span>Scenarios <b>${summary.scenariosCompleted}/${summary.scenariosTotal}</b></span><span>Attempts <b>${summary.attempts}</b></span><span>Submitted <b>${summary.projectsSubmitted}</b></span>`;
 }
 
 function renderReview() {
   const projects = getSavedProjects();
   const progress = getLessonProgress();
   $('#review-summary').textContent = `${projects.length} saved project${projects.length === 1 ? '' : 's'} · ${Object.keys(progress).length}/${guidedLessons.length} lessons complete`;
-  $('#review-projects').innerHTML = projects.length ? projects.map(project => `<article class="review-card"><div><strong>${escapeHtml(project.name)}</strong><small>Saved ${escapeHtml(new Date(project.savedAt).toLocaleString())}</small><span class="status ${project.status === 'approved' ? 'success' : project.status === 'changes-requested' ? 'danger' : 'info'}">${escapeHtml(project.status || 'draft')}</span></div><div class="button-row"><button class="secondary-button review-action" data-name="${escapeHtml(project.name)}" data-status="approved">Approve</button><button class="secondary-button review-action" data-name="${escapeHtml(project.name)}" data-status="changes-requested">Request changes</button></div></article>`).join('') : '<p class="muted">Save a project to review it here.</p>';
+  $('#review-projects').innerHTML = projects.length ? projects.map(project => {
+    const history = Array.isArray(project.reviewHistory) ? project.reviewHistory : [];
+    const status = project.status || 'draft';
+    return `<article class="review-card" data-project="${escapeHtml(project.name)}"><div><strong>${escapeHtml(project.name)}</strong><small>Owner: ${escapeHtml(project.owner?.name || 'Local learner')} · Saved ${escapeHtml(new Date(project.savedAt).toLocaleString())}</small><span class="status ${status === 'approved' ? 'success' : status === 'changes-requested' ? 'danger' : status === 'submitted' ? 'info' : 'info'}">${escapeHtml(status)}</span><small>${project.resubmissionCount || 0} resubmission${project.resubmissionCount === 1 ? '' : 's'} · ${history.length} review event${history.length === 1 ? '' : 's'}</small>${project.comments ? `<p class="review-comment"><strong>Latest feedback:</strong> ${escapeHtml(project.comments)}</p>` : ''}<details><summary>Review history</summary><ul>${history.length ? history.map(event => `<li>${escapeHtml(event.action)} · ${escapeHtml(event.actor || 'Unknown')} · ${escapeHtml(new Date(event.at).toLocaleString())}${event.comment ? ` — ${escapeHtml(event.comment)}` : ''}</li>`).join('') : '<li>No history yet.</li>'}</ul></details></div><div class="review-actions"><textarea class="review-comment-input" data-name="${escapeHtml(project.name)}" maxlength="500" placeholder="Comment for the student">${escapeHtml(project.comments || '')}</textarea><div class="button-row" data-role="instructor,administrator"><button class="secondary-button review-action" data-name="${escapeHtml(project.name)}" data-status="approved">Approve</button><button class="secondary-button review-action" data-name="${escapeHtml(project.name)}" data-status="changes-requested">Request changes</button></div></div></article>`;
+  }).join('') : '<p class="muted">Save a project to review it here.</p>';
+  applyRoleControls();
+  renderStudentProgressSummary();
 }
 
 function updateProjectReviewStatus(name, status) {
-  const projects = getSavedProjects().map(project => project.name === name ? { ...project, status, reviewedAt: new Date().toISOString(), reviewer: getProfile().name } : project);
+  const commentInput = $$('.review-comment-input').find(input => input.dataset.name === name);
+  const comment = commentInput?.value.trim() || getSavedProjects().find(project => project.name === name)?.comments || '';
+  const now = new Date().toISOString();
+  const projects = getSavedProjects().map(project => {
+    if (project.name !== name) return project;
+    const history = Array.isArray(project.reviewHistory) ? project.reviewHistory : [];
+    return { ...project, status, comments: comment, reviewedAt: now, reviewer: getProfile().name, reviewHistory: [...history, { action: status === 'approved' ? 'Approved' : 'Requested changes', actor: getProfile().name, at: now, comment }] };
+  });
   localStorage.setItem('dangote-academy-projects', JSON.stringify(projects));
   persistProjects(projects);
   renderReview();
   showToast(`Project marked ${status}.`);
+}
+
+function submitNamedProject() {
+  const name = $('#project-name')?.value.trim();
+  if (!name) {
+    showToast('Enter a project name before submitting.');
+    return;
+  }
+
+  function submitProject() {
+    return submitNamedProject();
+  }
+  const project = getSavedProjects().find(item => item.name === name);
+  if (!project) {
+    showToast('Save the project before submitting it.');
+    return;
+  }
+  const now = new Date().toISOString();
+  const resubmission = project.status === 'changes-requested';
+  const updated = getSavedProjects().map(item => item.name === name ? {
+    ...item,
+    status: 'submitted',
+    submittedAt: now,
+    submittedBy: getProfile().name,
+    resubmissionCount: (item.resubmissionCount || 0) + (resubmission ? 1 : 0),
+    reviewHistory: [...(Array.isArray(item.reviewHistory) ? item.reviewHistory : []), { action: resubmission ? 'Resubmitted' : 'Submitted', actor: getProfile().name, at: now }]
+  } : item);
+  localStorage.setItem('dangote-academy-projects', JSON.stringify(updated));
+  persistProjects(updated);
+  renderReview();
+  renderStudentProgressSummary();
+  showToast(resubmission ? 'Project resubmitted for instructor review.' : 'Project submitted for instructor review.');
+}
+
+function renderAdminTools() {
+  const target = $('#admin-management');
+  if (!target) return;
+  const profiles = getStoredProfiles();
+  const projects = getSavedProjects();
+  target.innerHTML = `<p class="muted">${profiles.length} local profile${profiles.length === 1 ? '' : 's'} · ${projects.length} project${projects.length === 1 ? '' : 's'} stored offline.</p><div class="admin-list">${profiles.map(profile => `<span>${escapeHtml(profile.name)} · ${escapeHtml(profile.role)}${profile.studentId ? ` · ${escapeHtml(profile.studentId)}` : ''}</span>`).join('') || '<span>No additional profiles saved.</span>'}</div>`;
 }
 
 function insertLoadScheduleModule() {
@@ -141,6 +270,7 @@ function calculateSchedule() {
     showToast(result.error);
     return;
   }
+  lastScheduleResult = result;
   $('#schedule-connected').textContent = `${result.connected.toFixed(2)} kW`;
   $('#schedule-demand').textContent = `${result.demand.toFixed(2)} kW`;
   $('#schedule-current').textContent = `${result.current.toFixed(2)} A`;
@@ -285,6 +415,11 @@ function projectSnapshot(name) {
       savedAt: new Date().toISOString(),
       rows: getBOQRows(),
       circuit: serialiseCircuit(),
+      owner: getProfile(),
+      status: 'draft',
+      comments: '',
+      reviewHistory: [],
+      resubmissionCount: 0,
       revisions: []
     };
 }
@@ -310,17 +445,91 @@ function saveNamedProject() {
   const previous = getSavedProjects().find(project => project.name === name);
   const project = projectSnapshot(name);
   project.status = previous?.status || 'draft';
+  project.comments = previous?.comments || '';
+  project.reviewHistory = previous?.reviewHistory || [];
+  project.resubmissionCount = previous?.resubmissionCount || 0;
+  project.owner = previous?.owner || getProfile();
   project.revisions = [...(previous?.revisions || []), {
+    revisionId: `r-${Date.now()}`,
     savedAt: previous?.savedAt || project.savedAt,
     rows: previous?.rows || project.rows,
-    circuit: previous?.circuit || project.circuit
+    circuit: previous?.circuit || project.circuit,
+    status: previous?.status || 'draft'
   }].slice(-10);
   projects.push(project);
   localStorage.setItem('dangote-academy-projects', JSON.stringify(projects));
   persistProjects(projects);
   refreshProjectList();
   $('#project-list').value = name;
+  renderRevisionControls(name);
+  renderReview();
   showToast(`Project saved: ${name}`);
+}
+
+function renderRevisionControls(name = $('#project-list')?.value) {
+  const list = $('#project-revision-list');
+  const project = getSavedProjects().find(item => item.name === name);
+  if (!list) return;
+  list.innerHTML = '<option value="">Choose a revision</option>';
+  (project?.revisions || []).forEach((revision, index) => {
+    const option = document.createElement('option');
+    option.value = String(index);
+    option.textContent = `Revision ${index + 1} · ${new Date(revision.savedAt).toLocaleString()}`;
+    list.appendChild(option);
+  });
+}
+
+function compareProjectRevisions() {
+  const name = $('#project-list')?.value;
+  const project = getSavedProjects().find(item => item.name === name);
+  const index = Number($('#project-revision-list')?.value);
+  const target = project?.revisions?.[index];
+  const output = $('#revision-comparison');
+  if (!project || !target || !output) {
+    if (output) output.textContent = 'Choose a project and revision to compare.';
+    return null;
+  }
+  const currentRows = project.rows || [];
+  const currentComponents = project.circuit?.components || [];
+  const targetRows = target.rows || [];
+  const targetComponents = target.circuit?.components || [];
+  const result = {
+    project: name,
+    revision: index,
+    boqChanged: JSON.stringify(currentRows) !== JSON.stringify(targetRows),
+    circuitChanged: JSON.stringify(project.circuit || {}) !== JSON.stringify(target.circuit || {}),
+    boqItems: `${targetRows.length} → ${currentRows.length}`,
+    components: `${targetComponents.length} → ${currentComponents.length}`
+  };
+  output.textContent = `Revision ${index + 1}: ${result.boqChanged ? 'BOQ changed' : 'BOQ unchanged'} · ${result.circuitChanged ? 'Circuit changed' : 'Circuit unchanged'} · items ${result.boqItems} · components ${result.components}`;
+  return result;
+}
+
+function restoreProjectRevision() {
+  const name = $('#project-list')?.value;
+  const index = Number($('#project-revision-list')?.value);
+  const project = getSavedProjects().find(item => item.name === name);
+  const revision = project?.revisions?.[index];
+  if (!project || !revision) {
+    showToast('Choose a saved revision first.');
+    return;
+  }
+
+  function compareRevisions() {
+    return compareProjectRevisions();
+  }
+
+  function restoreRevision() {
+    return restoreProjectRevision();
+  }
+  restoringBOQ = true;
+  $('#project-name').value = project.name;
+  $('#boq-body').innerHTML = '';
+  (revision.rows || []).forEach(item => addBoqRow(item.description, item.category, item.quantity, item.unit, item.price));
+  restoringBOQ = false;
+  updateBOQ();
+  if (revision.circuit) restoreCircuit(revision.circuit);
+  showToast(`Revision ${index + 1} restored to the workspace. Save the project to keep it.`);
 }
 
 function loadNamedProject() {
@@ -347,6 +556,9 @@ function deleteNamedProject() {
   localStorage.setItem('dangote-academy-projects', JSON.stringify(projects));
   persistProjects(projects);
   refreshProjectList();
+  renderRevisionControls();
+  renderReview();
+  renderAdminTools();
   showToast(`Project deleted: ${name}`);
 }
 
@@ -358,6 +570,45 @@ function exportProject() {
   link.download = `${name.replace(/[^a-z0-9]+/gi, '-').toLowerCase() || 'project'}.json`;
   link.click();
   URL.revokeObjectURL(link.href);
+}
+
+function buildEngineeringReport() {
+  const projectName = $('#project-name')?.value.trim() || 'Electrical Academy Project';
+  const progress = getStudentProgressSummary();
+  return {
+    schemaVersion: 1,
+    reportType: 'unified-engineering-report',
+    exportedAt: new Date().toISOString(),
+    project: {
+      name: projectName,
+      owner: getProfile(),
+      status: getSavedProjects().find(project => project.name === projectName)?.status || 'draft',
+      boq: getBOQRows(),
+      total: $('#boq-total')?.textContent || '0.00',
+      circuit: serialiseCircuit(),
+      calculation: lastCalculation,
+      schedule: lastScheduleResult,
+      review: getSavedProjects().find(project => project.name === projectName)?.reviewHistory || []
+    },
+    learning: {
+      lessons: getLessonProgress(),
+      troubleshooting: getTroubleshootingProgress(),
+      progress
+    }
+  };
+}
+
+function exportEngineeringReport() {
+  const report = buildEngineeringReport();
+  const name = report.project.name.replace(/[^a-z0-9]+/gi, '-').toLowerCase() || 'engineering-report';
+  const blob = new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' });
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(blob);
+  link.download = `${name}-engineering-report.json`;
+  link.click();
+  URL.revokeObjectURL(link.href);
+  showToast('Unified engineering report exported.');
+  return report;
 }
 
 function importProject(event) {
@@ -374,6 +625,8 @@ function importProject(event) {
       persistProjects(projects);
       refreshProjectList();
       $('#project-list').value = project.name;
+      renderRevisionControls(project.name);
+      renderReview();
       loadNamedProject();
       showToast(`Project imported: ${project.name}`);
     } catch {
@@ -679,7 +932,14 @@ function renderComponentCatalog() {
 }
 
 function renderTroubleshooting() {
-  $('#troubleshooting-results').innerHTML = troubleshootingScenarios.map((scenario, index) => `<article class="scenario-card"><h3>${scenario.title}</h3><p>${scenario.symptom}</p><div class="scenario-options">${scenario.options.map((option, optionIndex) => `<button class="scenario-option" data-scenario="${index}" data-answer="${optionIndex}">${option}</button>`).join('')}</div><p class="scenario-feedback" id="scenario-feedback-${index}"></p></article>`).join('');
+  const progress = getTroubleshootingProgress();
+  $('#troubleshooting-results').innerHTML = troubleshootingScenarios.map((scenario, index) => {
+    const id = scenario.id || `scenario-${index}`;
+    const item = progress[id] || {};
+    return `<article class="scenario-card ${item.completed ? 'completed' : ''}"><h3>${escapeHtml(scenario.title)}</h3><p>${escapeHtml(scenario.symptom)}</p><small class="scenario-attempts">Attempts: ${item.attempts || 0}${item.completed ? ' · Completed' : ''}</small><div class="scenario-options">${scenario.options.map((option, optionIndex) => `<button class="scenario-option" data-scenario="${index}" data-answer="${optionIndex}" ${item.completed ? 'disabled' : ''}>${escapeHtml(option)}</button>`).join('')}</div><p class="scenario-feedback" id="scenario-feedback-${index}">${item.completed ? 'Completed and saved offline.' : ''}</p></article>`;
+  }).join('');
+  $('#troubleshooting-score').textContent = troubleshootingScenarios.filter((scenario, index) => progress[scenario.id || `scenario-${index}`]?.completed).length;
+  renderStudentProgressSummary();
 }
 
 function getLessonProgress() {
@@ -698,6 +958,7 @@ function renderLessons() {
     return `<article class="lesson-card ${completed ? 'completed' : ''}"><div><span class="eyebrow">Exercise</span><h3>${escapeHtml(lesson.title)}</h3><p>${escapeHtml(lesson.objective)}</p><small><strong>Hint:</strong> ${escapeHtml(lesson.hint)}</small></div><button class="secondary-button lesson-check" data-lesson="${lesson.id}">${completed ? 'Completed' : 'Check exercise'}</button></article>`;
   }).join('');
   $('#lesson-score').textContent = guidedLessons.filter(lesson => progress[lesson.id]).length;
+  renderStudentProgressSummary();
 }
 
 function checkLesson(id) {
@@ -711,6 +972,7 @@ function checkLesson(id) {
   progress[id] = { completedAt: new Date().toISOString() };
   localStorage.setItem('dangote-academy-lessons', JSON.stringify(progress));
   renderLessons();
+  renderReview();
   showToast('Exercise completed and saved offline.');
 }
 
@@ -735,11 +997,27 @@ function answerTroubleshooting(event) {
   if (!option || option.disabled) return;
   const scenario = troubleshootingScenarios[Number(option.dataset.scenario)];
   const correct = Number(option.dataset.answer) === scenario.answer;
+  const scenarioId = scenario.id || `scenario-${option.dataset.scenario}`;
+  const progress = getTroubleshootingProgress();
+  const record = progress[scenarioId] || { attempts: 0, completed: false };
+  record.attempts += 1;
+  record.lastAnswer = Number(option.dataset.answer);
+  if (correct) {
+    record.completed = true;
+    record.completedAt = new Date().toISOString();
+  }
+  progress[scenarioId] = record;
+  localStorage.setItem(troubleshootingStorageKey, JSON.stringify(progress));
   const card = option.closest('.scenario-card');
-  $$('.scenario-option', card).forEach(button => { button.disabled = true; if (Number(button.dataset.answer) === scenario.answer) button.classList.add('correct'); });
+  $$('.scenario-option', card).forEach(button => {
+    if (correct) button.disabled = true;
+    if (Number(button.dataset.answer) === scenario.answer) button.classList.add('correct');
+  });
+  option.disabled = correct;
   if (!correct) option.classList.add('incorrect');
   $(`#scenario-feedback-${option.dataset.scenario}`).textContent = correct ? 'Correct diagnosis.' : `Review: ${scenario.options[scenario.answer]}.`;
   if (correct) $('#troubleshooting-score').textContent = Number($('#troubleshooting-score').textContent) + 1;
+  renderStudentProgressSummary();
 }
 
 function toggleSimulation() {
@@ -766,6 +1044,8 @@ function initialise() {
   renderTroubleshooting();
   renderLessons();
   renderReview();
+  applyRoleControls();
+  renderAdminTools();
   $$('.nav-item').forEach(item => item.addEventListener('click', () => switchModule(item.dataset.module)));
   $$('[data-go]').forEach(item => item.addEventListener('click', () => switchModule(item.dataset.go)));
   $('#menu-toggle').addEventListener('click', () => $('#sidebar').classList.toggle('open'));
@@ -774,7 +1054,8 @@ function initialise() {
   $('#add-to-boq').addEventListener('click', () => { if (!lastCalculation) { showToast('Run a calculation first.'); return; } addBoqRow(`${lastCalculation.cable.size}mm² Single Core Copper Wire`, 'Cabling', 1, 'Roll', lastCalculation.cable.size * 15000); addBoqRow(`${lastCalculation.breaker} MCB`, 'Protection', 1, 'Pcs', 4500); switchModule('boq'); showToast('Calculation added to the BOQ.'); });
   $('#boq-body').addEventListener('input', updateBOQ); $('#boq-body').addEventListener('click', event => { if (event.target.closest('.delete-row')) { event.target.closest('tr').remove(); updateBOQ(); } });
   $('#add-custom-item').addEventListener('click', () => addBoqRow('Custom electrical item', 'General', 1, 'Pcs', 0)); $('#export-pdf').addEventListener('click', exportPdf);
-  $('#save-project').addEventListener('click', saveNamedProject); $('#project-list').addEventListener('change', loadNamedProject); $('#delete-project').addEventListener('click', deleteNamedProject); $('#export-project').addEventListener('click', exportProject); $('#import-project').addEventListener('click', () => $('#project-file').click()); $('#project-file').addEventListener('change', importProject);
+  $('#save-project').addEventListener('click', saveNamedProject); $('#submit-project').addEventListener('click', submitNamedProject); $('#project-list').addEventListener('change', () => { loadNamedProject(); renderRevisionControls(); }); $('#delete-project').addEventListener('click', deleteNamedProject); $('#export-project').addEventListener('click', exportProject); $('#export-engineering-report').addEventListener('click', exportEngineeringReport); $('#import-project').addEventListener('click', () => $('#project-file').click()); $('#project-file').addEventListener('change', importProject);
+  $('#project-revision-list').addEventListener('change', () => { $('#revision-comparison').textContent = 'Ready to compare selected revision.'; }); $('#compare-revision').addEventListener('click', compareProjectRevisions); $('#restore-revision').addEventListener('click', restoreProjectRevision);
   $('#component-search').addEventListener('input', renderComponentCatalog); $('#component-category').addEventListener('change', renderComponentCatalog);
   $('#calculate-schedule').addEventListener('click', calculateSchedule); $('#schedule-phase').addEventListener('change', calculateSchedule); $('#schedule-method').addEventListener('change', calculateSchedule); $('#schedule-rcd').addEventListener('change', calculateSchedule); $('#add-load-row').addEventListener('click', () => { addScheduleRow(); calculateSchedule(); }); $('#schedule-body').addEventListener('input', calculateSchedule); $('#schedule-body').addEventListener('click', event => { if (event.target.closest('.delete-schedule-row')) { event.target.closest('tr').remove(); calculateSchedule(); } });
   $('#troubleshooting-results').addEventListener('click', answerTroubleshooting);
@@ -782,6 +1063,7 @@ function initialise() {
   $('#export-review').addEventListener('click', exportReview);
   $('#save-profile').addEventListener('click', saveProfile);
   $('#review-projects').addEventListener('click', event => { const button = event.target.closest('.review-action'); if (button) updateProjectReviewStatus(button.dataset.name, button.dataset.status); });
+  $('#review-projects').addEventListener('input', event => { if (!event.target.matches('.review-comment-input')) return; const name = event.target.dataset.name; const projects = getSavedProjects().map(project => project.name === name ? { ...project, comments: event.target.value } : project); localStorage.setItem('dangote-academy-projects', JSON.stringify(projects)); persistProjects(projects); });
   $$('[data-library-message]').forEach(button => button.addEventListener('click', () => showToast(button.dataset.libraryMessage)));
   $('#upload-video').addEventListener('click', () => showToast('Video upload is queued for the next module release.'));
   $$('.component-drag').forEach(item => item.addEventListener('dragstart', event => event.dataTransfer.setData('type', item.dataset.type)));

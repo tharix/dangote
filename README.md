@@ -56,6 +56,8 @@ The Lessons module provides practical circuit exercises with hints, offline prog
 
 Offline profiles support student, instructor, and administrator roles. Saved projects can be reviewed locally, marked approved, or returned for changes; reviewer name and timestamps are stored with the project.
 
+The project workspace can export a unified engineering report containing the calculation, load schedule, BOQ, circuit, review history, and learning progress. Saved project revisions can be compared and restored to the workspace before saving. Students submit projects for review; instructors approve or request changes with comments and a resubmission history; administrators can manage the local profile/project directory. Troubleshooting attempts and completed scenarios are stored offline and included in the student progress summary.
+
 The circuit toolbox also includes a five-second timer relay and a manually toggled relay. Timer components begin open and close after the simulated delay; relay components can be toggled during a simulation. Troubleshooting now includes timer-start and relay-chatter diagnostics. These are training models, not safety-certified control logic.
 
 ## Team workflow

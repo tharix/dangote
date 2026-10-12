@@ -57,3 +57,19 @@ button { border: 0; cursor: pointer; }
 @media (max-width: 1050px) { .sidebar { width: 230px; flex-basis: 230px; }.topbar, .page-content { padding-left: 25px; padding-right: 25px; }.stats-grid { grid-template-columns: repeat(2, 1fr); }.calculator-grid { grid-template-columns: 1fr; } }
 @media (max-width: 760px) { .sidebar { position: fixed; inset: 0 auto 0 0; z-index: 20; width: 270px; transform: translateX(-100%); transition: transform .25s; }.sidebar.open { transform: none; box-shadow: 10px 0 30px rgba(0,0,0,.2); }.menu-toggle { display: inline-grid; }.topbar { min-height: 70px; padding: 13px 17px; }.topbar h1 { font-size: 17px; }.topbar-actions .online { display: none; }.page-content { padding: 26px 17px 42px; }.welcome-row, .section-heading { align-items: flex-start; flex-direction: column; }.welcome-row .primary-button { width: 100%; }.dashboard-grid, .circuit-layout, .component-grid, .troubleshooting-grid, .library-grid { grid-template-columns: 1fr; }.circuit-layout { min-height: 0; }.toolbox { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }.toolbox .panel-heading, .tool-label { grid-column: 1 / -1; }.tool-label { margin: 10px 0 0; }.component-drag { margin: 0; }.circuit-canvas { min-height: 400px; }.field-grid, .result-pair { grid-template-columns: 1fr; }.table-summary { align-items: flex-start; gap: 14px; flex-direction: column; }.status { display: none; }.selector-toolbar, .project-toolbar, .schedule-toolbar { flex-direction: column; display: flex; align-items: stretch; }.selector-toolbar select { width: 100%; }.project-toolbar #delete-project { width: 100%; }.schedule-toolbar label { min-width: 0; }.schedule-results { grid-template-columns: 1fr; } }
 @media (max-width: 430px) { .stats-grid { gap: 10px; }.stat-card { padding: 14px; }.stat-card strong { font-size: 24px; }.panel, .form-panel, .results-panel { padding: 18px; }.toolbox { padding: 13px; }.topbar-left { gap: 6px; }.eyebrow { font-size: 9px; } }
+/* Phase-two workflow surfaces */
+.revision-panel, .progress-summary, .admin-management { margin-top: 18px; }
+.revision-toolbar { display: flex; flex-wrap: wrap; align-items: end; gap: 10px; padding-top: 16px; }
+.revision-toolbar label { min-width: 240px; }
+.review-actions { display: grid; min-width: 260px; gap: 10px; }
+.review-comment-input { min-height: 72px; padding: 10px; resize: vertical; border: 1px solid var(--line); font-size: 12px; }
+.review-comment { margin: 8px 0; color: var(--ink); font-size: 12px; }
+.review-card details { margin-top: 8px; color: var(--muted); font-size: 11px; }
+.review-card details ul { margin: 6px 0 0; padding-left: 18px; }
+.progress-summary { display: flex; flex-wrap: wrap; gap: 22px; padding: 16px 20px; }
+.progress-summary span { color: var(--muted); font-size: 12px; }
+.progress-summary b { display: inline-block; margin-left: 4px; color: var(--ink); font-size: 16px; }
+.scenario-card.completed { border-color: var(--green); background: #f3fff8; }
+.scenario-attempts { display: block; margin-bottom: 10px; color: var(--muted); font-size: 11px; }
+.admin-list { display: grid; gap: 6px; margin-top: 12px; color: var(--muted); font-size: 12px; }
+[hidden] { display: none !important; }
