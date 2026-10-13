@@ -8,15 +8,15 @@
 <body>
   <h1>Browser tests</h1>
   <ul id="results"></ul>
-  <script src="../core.js?v=20261012-1223"></script>
-  <iframe id="app" src="../index.html?browser-test=1&v=20261012-1223" hidden title="application under test"></iframe>
+  <script src="../core.js?v=20261013-plc1"></script>
+  <iframe id="app" src="../index.html?browser-test=1&v=20261013-plc1" hidden title="application under test"></iframe>
   <script>
     const results = document.querySelector('#results');
     const tests = [
       ['valid load sizing', () => DangoteAcademyCore.calculateLoadSizing({ phase: 1, loadType: 'kw', loadValue: 10, pf: .85, diversity: .8, installMethod: 'conduit' }).valid],
       ['dashboard reports local data and safely escapes project names', () => {
         const app = testApp();
-        const keys = ['dangote-academy-projects', 'dangote-academy-lessons', 'dangote-academy-troubleshooting'];
+        const keys = ['dangote-academy-projects', 'dangote-academy-lessons', 'dangote-academy-troubleshooting', 'dangote-academy-installation', 'dangote-academy-station-diagnostics', 'dangote-academy-electronics-diagnostics'];
         const previous = keys.map(key => app.localStorage.getItem(key));
         try {
           app.localStorage.setItem(keys[0], JSON.stringify([{
@@ -30,7 +30,7 @@
           const activity = app.document.querySelector('#dashboard-activity');
           return app.document.querySelector('#dashboard-project-count').textContent === '1' &&
             app.document.querySelector('#dashboard-lesson-count').textContent === '1 / 3' &&
-            app.document.querySelector('#dashboard-scenario-count').textContent === '1 / 5' &&
+            app.document.querySelector('#dashboard-scenario-count').textContent === '1 / 8' &&
             activity.querySelectorAll('img').length === 0 &&
             activity.textContent.includes('<img src=x onerror=alert(1)>') &&
             !activity.textContent.includes('John Doe');
@@ -44,11 +44,30 @@
       }],
       ['invalid power factor rejected', () => !DangoteAcademyCore.calculateLoadSizing({ phase: 1, loadType: 'kw', loadValue: 10, pf: 1.2, diversity: .8, installMethod: 'clipped' }).valid],
       ['schedule demand calculated', () => DangoteAcademyCore.calculateScheduleSizing({ phase: 1, method: 'clipped', rcd: 'recommended', rows: [{ load: 1.2, quantity: 1, pf: .95, diversity: .8 }] }).demand === .96],
+      ['transistor base resistor meets forced-beta drive with a safe E12 value', () => {
+        const result = DangoteAcademyCore.calculateTransistorBaseResistor({
+          controlVoltage: 3.3, baseEmitterVoltage: .7, collectorCurrentMa: 20, forcedBeta: 10
+        });
+        return result.valid && result.maximumResistance === 1300 &&
+          result.standardResistance === 1200 && result.availableCollectorCurrentMa >= 20;
+      }],
+      ['transistor base resistor rejects unsafe drive inputs', () =>
+        !DangoteAcademyCore.calculateTransistorBaseResistor({
+          controlVoltage: 3.3, baseEmitterVoltage: 3.3, collectorCurrentMa: 20, forcedBeta: 10
+        }).valid],
       ['correction factors change cable selection', () => DangoteAcademyCore.calculateLoadSizing({ phase: 1, loadType: 'kw', loadValue: 10, pf: .85, diversity: .8, installMethod: 'conduit', cableLength: 75, ambientFactor: .94, groupingFactor: .8 }).cable.size === 25],
       ['selected breaker rating is coordinated to derated cable capacity', () => {
         const result = DangoteAcademyCore.calculateLoadSizing({ phase: 1, loadType: 'kw', loadValue: 10, pf: .85, diversity: .8, installMethod: 'conduit' });
         return result.protectionCoordinated && result.breakerRating >= result.current &&
           result.breakerRating <= result.actualCapacity;
+      }],
+      ['motor feeder estimate uses efficiency and starting-current multiple', () => {
+        const result = DangoteAcademyCore.calculateMotorDesign({
+          powerKw: 15, voltage: 400, powerFactor: .85, efficiency: .9,
+          startingCurrentMultiple: 6, cableLength: 40, installMethod: 'tray'
+        });
+        return result.valid && result.current === 28.3 && result.startingCurrent === 169.81 &&
+          result.withinCapacity && result.protectionCoordinated;
       }],
       ['invalid cable length rejected', () => !DangoteAcademyCore.calculateLoadSizing({ phase: 1, loadType: 'kw', loadValue: 10, pf: .85, diversity: .8, installMethod: 'conduit', cableLength: 0 }).valid],
       ['three-phase voltage applied', () => DangoteAcademyCore.calculateLoadSizing({ phase: 3, loadType: 'kw', loadValue: 15, pf: .9, diversity: 1, installMethod: 'tray' }).voltage === 400],
@@ -73,6 +92,84 @@
           connection('source', 'mcb', 'line'), connection('mcb', 'lamp', 'line')
         ]);
         return app.validateCircuit() && app.document.querySelector('#circuit-message').textContent.includes('complete');
+      }],
+      ['protected-lamp walkthrough gates each step and completes without replacing the canvas', () => {
+        const app = testApp();
+        loadCircuit(app, []);
+        app.startCircuitWalkthrough();
+        app.document.querySelector('#walkthrough-check').click();
+        const blockedAtSource = app.document.querySelector('#walkthrough-count').textContent === 'Step 1 of 6';
+        loadCircuit(app, ['source-ac']);
+        app.document.querySelector('#walkthrough-check').click();
+        const sourceAccepted = app.document.querySelector('#walkthrough-count').textContent === 'Step 2 of 6';
+        loadCircuit(app, ['source-ac', 'mcb', 'lamp']);
+        app.document.querySelector('#walkthrough-check').click();
+        app.document.querySelector('#walkthrough-check').click();
+        app.document.querySelector('#walkthrough-check').click();
+        const connectionRequired = app.document.querySelector('#walkthrough-count').textContent === 'Step 4 of 6';
+        loadCircuit(app, ['source-ac', 'mcb', 'lamp'], [
+          connection('source', 'mcb', 'line'), connection('mcb', 'lamp', 'line'),
+          connection('lamp', 'source', 'neutral')
+        ]);
+        app.document.querySelector('#walkthrough-check').click();
+        app.document.querySelector('#walkthrough-check').click();
+        app.document.querySelector('#walkthrough-check').click();
+        return blockedAtSource && sourceAccepted && connectionRequired &&
+          app.document.querySelector('#walkthrough-count').textContent === 'Complete' &&
+          app.document.querySelectorAll('#circuit-canvas .circuit-component').length === 3 &&
+          app.document.querySelector('#walkthrough-check').disabled;
+      }],
+      ['virtual meter and scope reflect simulation models and stop safely', () => {
+        const app = testApp();
+        const mode = app.document.querySelector('#meter-measurement');
+        const value = app.document.querySelector('#meter-value');
+        const scope = app.document.querySelector('#scope-mode');
+        const button = app.document.querySelector('#simulate-circuit');
+        loadCircuit(app, ['source-ac', 'mcb', 'lamp'], [
+          connection('source', 'mcb', 'line'), connection('mcb', 'lamp', 'line'),
+          connection('lamp', 'source', 'neutral')
+        ]);
+        mode.value = 'continuity';
+        app.renderVirtualInstruments();
+        const continuity = value.textContent === 'CLOSED' &&
+          app.document.querySelector('#meter-note').textContent.includes('not a physical continuity test');
+        let acReadings = false;
+        let runningContinuity = false;
+        try {
+          mode.value = 'source-voltage';
+          app.toggleSimulation();
+          acReadings = value.textContent === '230' && scope.textContent.includes('AC') &&
+            app.document.querySelector('#scope-trace').getAttribute('d').includes('L') &&
+            Number(app.document.querySelector('#sim-i').textContent) === .5;
+          mode.value = 'circuit-power';
+          app.renderVirtualInstruments();
+          acReadings = acReadings && value.textContent === '115';
+          mode.value = 'continuity';
+          app.renderVirtualInstruments();
+          runningContinuity = value.textContent === 'STOP';
+        } finally {
+          if (button.textContent.includes('Stop simulation')) app.toggleSimulation();
+        }
+        const stoppedState = value.textContent === 'CLOSED' &&
+          scope.textContent.includes('No energized signal');
+        loadCircuit(app, ['battery', 'mcb', 'lamp'], [
+          connection('battery', 'mcb', 'line'), connection('mcb', 'lamp', 'line'),
+          connection('lamp', 'battery', 'neutral')
+        ]);
+        mode.value = 'source-voltage';
+        app.toggleSimulation();
+        const dcReading = value.textContent === '12' && scope.textContent.includes('DC');
+        app.toggleSimulation();
+        return continuity && acReadings && runningContinuity && stoppedState && dcReading;
+      }],
+      ['guided electronics projects show low-voltage materials and supervision guidance', () => {
+        const app = testApp();
+        const cards = [...app.document.querySelectorAll('.guided-project-card')];
+        return cards.length === 3 &&
+          cards[0].textContent.includes('5 V current-limited supply') &&
+          cards[1].textContent.includes('suitable voltage rating') &&
+          cards[2].textContent.includes('exact datasheet') &&
+          app.document.querySelector('.project-safety-note').textContent.includes('not construction instructions for mains');
       }],
       ['circuit validation requires exactly one source', () => {
         const app = testApp();
@@ -151,6 +248,25 @@
         app.toggleSimulation();
         return open && short && normal;
       }],
+      ['loose-connection fault updates diagnostics and the selected trend plot', () => {
+        const app = testApp();
+        loadCircuit(app, ['source-ac', 'mcb', 'lamp'], [
+          connection('source', 'mcb', 'line'), connection('mcb', 'lamp', 'line')
+        ]);
+        app.toggleSimulation();
+        const normalCurrent = Number(app.document.querySelector('#sim-i').textContent);
+        const fault = app.document.querySelector('#circuit-fault');
+        fault.value = 'loose-connection';
+        fault.dispatchEvent(new app.Event('change'));
+        const diagnosis = app.document.querySelector('#sim-status').textContent === 'Fault: loose connection' &&
+          app.document.querySelector('#circuit-message').textContent.includes('reduces current') &&
+          Number(app.document.querySelector('#sim-i').textContent) < normalCurrent &&
+          app.document.querySelector('#circuit-trend-plot .plot-svg');
+        app.toggleSimulation();
+        fault.value = 'none';
+        fault.dispatchEvent(new app.Event('change'));
+        return diagnosis;
+      }],
       ['undo and redo restore circuit changes', () => {
         const app = testApp();
         loadCircuit(app, []);
@@ -173,6 +289,80 @@
         app.loadCircuit();
         const restored = app.serialiseCircuit();
         return saved.version === 2 && restored.components.length === 3 && restored.connections[0].conductor === 'phase-b';
+      }],
+      ['advanced circuit parts preserve adjustable values through save and restore', () => {
+        const app = testApp();
+        app.restoreCircuit({ version: 2, components: [], connections: [] });
+        const id = app.createComponent('resistor', 40, 40);
+        app.document.querySelector(`#${id}`).click();
+        const value = app.document.querySelector('#component-value-input');
+        value.value = '2200';
+        app.applyCircuitComponentValue();
+        const saved = app.serialiseCircuit();
+        app.restoreCircuit(saved);
+        const restored = app.serialiseCircuit();
+        const invalid = JSON.parse(JSON.stringify(saved));
+        invalid.components[0].value = 2000000;
+        let rejected = false;
+        try { app.restoreCircuit(invalid); } catch (error) { rejected = error.message.includes('component'); }
+        return restored.components[0].type === 'resistor' && restored.components[0].value === 2200 &&
+          rejected && app.serialiseCircuit().components[0].value === 2200 &&
+          app.document.querySelectorAll('.component-drag[data-type]').length >= 20;
+      }],
+      ['bench-supply LED circuit validates and plots modeled current safely', () => {
+        const app = testApp();
+        app.restoreCircuit({
+          version: 2,
+          components: [
+            { id: 'bench', type: 'bench-supply', left: 0, top: 0 },
+            { id: 'fuse', type: 'fuse', left: 120, top: 0 },
+            { id: 'resistor', type: 'resistor', value: 1000, left: 240, top: 0 },
+            { id: 'led', type: 'led', value: 10, left: 360, top: 0 }
+          ],
+          connections: [
+            { from: 'bench', to: 'fuse', fromTerminal: 'out', toTerminal: 'in', conductor: 'line' },
+            { from: 'fuse', to: 'resistor', fromTerminal: 'out', toTerminal: 'in', conductor: 'line' },
+            { from: 'resistor', to: 'led', fromTerminal: 'out', toTerminal: 'in', conductor: 'line' },
+            { from: 'led', to: 'bench', fromTerminal: 'out', toTerminal: 'in', conductor: 'line' }
+          ]
+        });
+        const valid = app.validateCircuit();
+        app.toggleSimulation();
+        const safeLowVoltage = app.document.querySelector('#sim-v').textContent === '5' &&
+          Number(app.document.querySelector('#sim-i').textContent) > 0 &&
+          app.document.querySelector('#circuit-trend-plot .plot-svg');
+        app.toggleSimulation();
+        app.restoreCircuit({
+          version: 2,
+          components: [
+            { id: 'bench', type: 'bench-supply', left: 0, top: 0 },
+            { id: 'fuse', type: 'fuse', left: 120, top: 0 },
+            { id: 'led', type: 'led', left: 240, top: 0 }
+          ],
+          connections: [
+            { from: 'bench', to: 'fuse', conductor: 'line' },
+            { from: 'fuse', to: 'led', conductor: 'line' },
+            { from: 'led', to: 'bench', conductor: 'line' }
+          ]
+        });
+        return valid && safeLowVoltage && !app.validateCircuit() &&
+          app.document.querySelector('#circuit-message').textContent.includes('series resistor');
+      }],
+      ['engineering worksheets and circuit simulation expose plotted results', () => {
+        const app = testApp();
+        const electricalPlots = app.document.querySelector('#load-sizing-plot .plot-svg') &&
+          app.document.querySelector('#schedule-phase-plot .plot-svg') &&
+          app.document.querySelector('#motor-design-plot .plot-svg');
+        app.document.querySelector('#electronics-led-form').dispatchEvent(new app.Event('submit', { bubbles: true, cancelable: true }));
+        app.document.querySelector('#electronics-divider-form').dispatchEvent(new app.Event('submit', { bubbles: true, cancelable: true }));
+        app.document.querySelector('#electronics-rc-form').dispatchEvent(new app.Event('submit', { bubbles: true, cancelable: true }));
+        app.document.querySelector('#electronics-bjt-form').dispatchEvent(new app.Event('submit', { bubbles: true, cancelable: true }));
+        return Boolean(electricalPlots &&
+          app.document.querySelector('#electronics-led-plot .plot-svg') &&
+          app.document.querySelector('#electronics-divider-plot .plot-svg') &&
+          app.document.querySelector('#electronics-rc-plot .plot-svg') &&
+          app.document.querySelector('#electronics-bjt-plot .plot-svg') &&
+          app.document.querySelector('#electronics-bjt-result').textContent.includes('1200 Ω'));
       }],
       ['version one JSON migrates with default terminals and line conductor', () => {
         const app = testApp();
@@ -352,6 +542,36 @@
           app.serialiseCircuit().components.length === 3 &&
           app.getLoadScheduleSnapshot().rows[0].load === '2.5';
       }],
+      ['motor design and commissioning records persist with project revisions and reports', () => {
+        const app = testApp();
+        const projectName = `Commissioning browser project ${Date.now()}`;
+        app.document.querySelector('#project-name').value = projectName;
+        const designCheck = app.document.querySelector('[data-commissioning-check="design"]');
+        designCheck.querySelector('.commissioning-status').value = 'recorded';
+        designCheck.querySelector('.commissioning-note').value = 'Approved schedule ref A-01';
+        app.persistCommissioningDraft();
+        app.saveNamedProject();
+        app.document.querySelector('#motor-power').value = '18';
+        app.calculateMotorFeeder();
+        designCheck.querySelector('.commissioning-status').value = 'review';
+        designCheck.querySelector('.commissioning-note').value = 'Revise circuit schedule';
+        app.persistCommissioningDraft();
+        app.saveNamedProject();
+        const saved = JSON.parse(app.localStorage.getItem('dangote-academy-projects')).find(project => project.name === projectName);
+        app.document.querySelector('#project-list').value = projectName;
+        app.renderRevisionControls(projectName);
+        app.document.querySelector('#project-revision-list').value = '0';
+        const comparison = app.compareProjectRevisions();
+        app.restoreProjectRevision();
+        const restoredCheck = app.document.querySelector('[data-commissioning-check="design"]');
+        const report = app.buildEngineeringReport();
+        return saved.revisions.length === 1 && comparison.motorDesignChanged && comparison.commissioningChanged &&
+          restoredCheck.querySelector('.commissioning-status').value === 'recorded' &&
+          restoredCheck.querySelector('.commissioning-note').value === 'Approved schedule ref A-01' &&
+          app.document.querySelector('#motor-power').value === '15' &&
+          report.project.commissioningSummary.recorded === 1 &&
+          report.project.commissioning.find(item => item.id === 'design').status === 'recorded';
+      }],
       ['troubleshooting attempts and completed scenarios persist', () => {
         const app = testApp();
         app.localStorage.removeItem('dangote-academy-troubleshooting');
@@ -361,7 +581,7 @@
         option.dispatchEvent(new app.MouseEvent('click', { bubbles: true }));
         const progress = JSON.parse(app.localStorage.getItem('dangote-academy-troubleshooting'));
         return progress['scenario-0'].attempts === 1 && progress['scenario-0'].completed &&
-          app.document.querySelector('#student-progress-summary').textContent.includes('Scenarios');
+          app.document.querySelector('#student-progress-summary').textContent.includes('Building scenarios');
       }],
       ['student submission records review history and resubmission count', () => {
         const app = testApp();
@@ -486,9 +706,131 @@
           app.clearInterval = originalClearInterval;
         }
       }],
-      ['troubleshooting includes timer and relay diagnostics', () => {
+      ['troubleshooting includes timer, relay, motor, and building diagnostics', () => {
         const app = testApp();
-        return app.document.querySelectorAll('.scenario-card').length === 5;
+        app.localStorage.removeItem('dangote-academy-troubleshooting');
+        app.renderTroubleshooting();
+        const motorFault = app.document.querySelector('.scenario-card [data-scenario="5"]');
+        const safetyChoice = motorFault?.parentElement.querySelector('[data-answer="1"]')?.textContent || '';
+        motorFault?.parentElement.querySelector('[data-answer="1"]')?.dispatchEvent(new app.MouseEvent('click', { bubbles: true }));
+        const progress = JSON.parse(app.localStorage.getItem('dangote-academy-troubleshooting') || '{}');
+        return app.document.querySelectorAll('#troubleshooting-results .scenario-card').length === 8 &&
+          safetyChoice.includes('Isolate safely') &&
+          progress['motor-overload']?.completed === true &&
+          app.document.querySelector('#troubleshooting-total').textContent === '8';
+      }],
+      ['electronics lab designs low-voltage circuits and tracks safe troubleshooting progress', () => {
+        const app = testApp();
+        app.localStorage.removeItem('dangote-academy-electronics-diagnostics');
+        app.renderElectronicsDiagnostics();
+        app.document.querySelector('#electronics-led-form').dispatchEvent(new app.Event('submit', { bubbles: true, cancelable: true }));
+        app.document.querySelector('#electronics-divider-form').dispatchEvent(new app.Event('submit', { bubbles: true, cancelable: true }));
+        app.document.querySelector('#electronics-rc-form').dispatchEvent(new app.Event('submit', { bubbles: true, cancelable: true }));
+        const calculationsWorked = app.document.querySelector('#electronics-led-result').textContent.includes('330 Ω') &&
+          app.document.querySelector('#electronics-divider-result').textContent.includes('6 V') &&
+          app.document.querySelector('#electronics-rc-result').textContent.includes('0.1 s');
+        const invalidDesignsRejected = !app.DangoteAcademyCore.calculateLedResistor({
+          supplyVoltage: 5, ledVoltage: 5, targetCurrentMa: 10
+        }).valid && !app.DangoteAcademyCore.calculateVoltageDivider({
+          inputVoltage: 48, upperResistance: 10000, lowerResistance: 10000
+        }).valid && !app.DangoteAcademyCore.calculateRcNetwork({
+          resistance: 999, capacitance: .00001
+        }).valid;
+        const firstCard = app.document.querySelector('.electronics-scenario-card');
+        const evidence = firstCard.querySelector('details').textContent;
+        firstCard.querySelector('[data-answer="0"]').dispatchEvent(new app.MouseEvent('click', { bubbles: true }));
+        let progress = JSON.parse(app.localStorage.getItem('dangote-academy-electronics-diagnostics'));
+        const wrongAnswerRecorded = progress['electronics-led-open'].attempts === 1 &&
+          progress['electronics-led-open'].completed === false;
+        app.document.querySelector('.electronics-scenario-card [data-answer="1"]').dispatchEvent(new app.MouseEvent('click', { bubbles: true }));
+        progress = JSON.parse(app.localStorage.getItem('dangote-academy-electronics-diagnostics'));
+        const report = app.buildEngineeringReport();
+        return calculationsWorked && invalidDesignsRejected &&
+          app.document.querySelectorAll('.electronics-scenario-card').length === 6 &&
+          evidence.includes('current-limited') && wrongAnswerRecorded &&
+          progress['electronics-led-open'].attempts === 2 &&
+          progress['electronics-led-open'].completed === true &&
+          app.document.querySelector('#electronics-score').textContent === '1' &&
+          app.document.querySelector('#dashboard-electronics-count').textContent === 'Electronics cases 1 / 6' &&
+          report.learning.electronicsDiagnostics['electronics-led-open'].completed === true &&
+          report.learning.progress.electronicsScenariosCompleted === 1 &&
+          report.learning.progress.electronicsAttempts === 2;
+      }],
+      ['power-station diagnostics correlate event evidence and escalate safely', () => {
+        const app = testApp();
+        app.localStorage.removeItem('dangote-academy-station-diagnostics');
+        app.renderStationDiagnostics();
+        app.document.querySelector('#station-system-filter').value = 'Generator protection';
+        app.renderStationDiagnostics();
+        const firstCard = app.document.querySelector('.station-scenario-card');
+        const evidence = firstCard.querySelector('details').textContent;
+        firstCard.querySelector('[data-answer="0"]').dispatchEvent(new app.MouseEvent('click', { bubbles: true }));
+        let progress = JSON.parse(app.localStorage.getItem('dangote-academy-station-diagnostics'));
+        const wrongAnswerDidNotComplete = progress['station-generator-differential'].attempts === 1 &&
+          progress['station-generator-differential'].completed === false;
+        app.document.querySelector('.station-scenario-card [data-answer="1"]').dispatchEvent(new app.MouseEvent('click', { bubbles: true }));
+        progress = JSON.parse(app.localStorage.getItem('dangote-academy-station-diagnostics'));
+        const report = app.buildEngineeringReport();
+        return app.document.querySelectorAll('.station-scenario-card').length === 1 &&
+          evidence.includes('sequence-of-events') && wrongAnswerDidNotComplete &&
+          progress['station-generator-differential'].attempts === 2 &&
+          progress['station-generator-differential'].completed === true &&
+          app.document.querySelector('#station-score').textContent === '1' &&
+          app.document.querySelector('.station-feedback').textContent.includes('must not be bypassed') &&
+          app.document.querySelector('#dashboard-station-count').textContent === 'Power-station cases 1 / 8' &&
+          report.learning.stationDiagnostics['station-generator-differential'].completed === true &&
+          report.learning.progress.stationScenariosCompleted === 1;
+      }],
+      ['PLC lab runs seal-in ladder logic and shows scan history', () => {
+        const app = testApp();
+        app.stopPlcScans();
+        app.selectPlcProgram('motor-starter');
+        app.document.querySelector('#plc-inputs [data-plc-input="I0.0"]').click();
+        const started = app.document.querySelector('[data-plc-output="Q0.0"] b').textContent === 'ON';
+        app.document.querySelector('#plc-inputs [data-plc-input="I0.0"]').click();
+        const sealed = app.document.querySelector('[data-plc-output="Q0.0"] b').textContent === 'ON';
+        app.document.querySelector('#plc-inputs [data-plc-input="I0.1"]').click();
+        const stopped = app.document.querySelector('[data-plc-output="Q0.0"] b').textContent === 'OFF';
+        return started && sealed && stopped &&
+          app.document.querySelector('#plc-scan-count').textContent === '3' &&
+          app.document.querySelector('#plc-trend svg').getAttribute('aria-label').includes('3 PLC scans');
+      }],
+      ['PLC editor supports parallel branches and safely injects an input fault', () => {
+        const app = testApp();
+        app.selectPlcProgram('motor-starter');
+        app.document.querySelector('#plc-ladder [data-plc-add-branch]').click();
+        const branchAdded = app.document.querySelectorAll('#plc-ladder .plc-branch').length === 4;
+        app.document.querySelector('#plc-fault').value = 'input-open';
+        app.document.querySelector('#plc-fault').dispatchEvent(new app.Event('change', { bubbles: true }));
+        app.document.querySelector('#plc-fault-target').value = 'I0.2';
+        app.document.querySelector('#plc-fault-target').dispatchEvent(new app.Event('change', { bubbles: true }));
+        return branchAdded &&
+          app.document.querySelector('#plc-inputs [data-plc-input="I0.2"]').textContent.includes('FORCED') &&
+          app.document.querySelector('#plc-status-text').textContent.includes('forced OFF');
+      }],
+      ['PLC output inhibition shows a channel fault without destroying the ladder output image', () => {
+        const app = testApp();
+        app.selectPlcProgram('motor-starter');
+        app.document.querySelector('#plc-inputs [data-plc-input="I0.0"]').click();
+        app.document.querySelector('#plc-fault').value = 'output-inhibit';
+        app.document.querySelector('#plc-fault').dispatchEvent(new app.Event('change', { bubbles: true }));
+        const inhibited = app.document.querySelector('[data-plc-output="Q0.0"] b').textContent.includes('INHIBITED');
+        const rungStillEnergized = app.document.querySelector('#plc-ladder .plc-rung').classList.contains('is-true');
+        app.document.querySelector('#plc-fault').value = 'none';
+        app.document.querySelector('#plc-fault').dispatchEvent(new app.Event('change', { bubbles: true }));
+        return inhibited && rungStillEnergized &&
+          app.document.querySelector('[data-plc-output="Q0.0"] b').textContent === 'ON';
+      }],
+      ['PLC tank-pump example starts on low demand and stops at the high-level input', () => {
+        const app = testApp();
+        app.selectPlcProgram('tank-pump');
+        app.document.querySelector('#plc-inputs [data-plc-input="I0.4"]').click();
+        const pumpStarted = app.document.querySelector('[data-plc-output="Q0.0"] b').textContent === 'ON' &&
+          app.document.querySelector('[data-plc-output="Q0.2"] b').textContent === 'ON';
+        app.document.querySelector('#plc-inputs [data-plc-input="I0.5"]').click();
+        return pumpStarted &&
+          app.document.querySelector('[data-plc-output="Q0.0"] b').textContent === 'OFF' &&
+          app.document.querySelector('[data-plc-output="Q0.2"] b').textContent === 'OFF';
       }]
     ];
 

@@ -158,5 +158,236 @@
     };
   }
 
-  return { calculateLoadSizing, calculateScheduleSizing };
+  function calculateMotorDesign(input = {}) {
+    const {
+      powerKw, voltage = 400, powerFactor, efficiency, startingCurrentMultiple,
+      cableLength = 50, installMethod, ambientFactor = 1, groupingFactor = 1
+    } = input || {};
+    if (!Number.isFinite(powerKw) || powerKw <= 0 || powerKw > 1000 ||
+      ![380, 400, 415].includes(voltage) ||
+      !Number.isFinite(powerFactor) || powerFactor <= 0 || powerFactor > 1 ||
+      !Number.isFinite(efficiency) || efficiency <= 0 || efficiency > 1 ||
+      !Number.isFinite(startingCurrentMultiple) || startingCurrentMultiple < 1 || startingCurrentMultiple > 20) {
+      return { valid: false, error: 'Enter a supported motor rating, supply voltage, power factor, efficiency, and starting-current multiplier.' };
+    }
+    const current = powerKw * 1000 / (Math.sqrt(3) * voltage * powerFactor * efficiency);
+    const startingCurrent = current * startingCurrentMultiple;
+    if (!Number.isFinite(current) || !Number.isFinite(startingCurrent)) {
+      return { valid: false, error: 'The calculated motor current exceeds the supported numeric range.' };
+    }
+    const cable = calculateLoadSizing({
+      phase: 3,
+      loadType: 'amps',
+      loadValue: current,
+      pf: 1,
+      diversity: 1,
+      installMethod,
+      cableLength,
+      ambientFactor,
+      groupingFactor
+    });
+    if (!cable.valid) return cable;
+    return {
+      valid: true,
+      powerKw,
+      voltage,
+      powerFactor,
+      efficiency,
+      current: round(current),
+      startingCurrentMultiple,
+      startingCurrent: round(startingCurrent),
+      cable: cable.cable,
+      breakerRating: cable.breakerRating,
+      actualCapacity: cable.actualCapacity,
+      withinCapacity: cable.withinCapacity,
+      protectionCoordinated: cable.protectionCoordinated,
+      voltageDrop: cable.voltageDrop,
+      voltageDropPercent: cable.voltageDropPercent,
+      cableLength,
+      methodLabel: cable.methodLabel,
+      derating: cable.derating
+    };
+  }
+
+  function calculateLedResistor(input = {}) {
+    const { supplyVoltage, ledVoltage, targetCurrentMa } = input || {};
+    if (!Number.isFinite(supplyVoltage) || supplyVoltage <= 0 || supplyVoltage > 24 ||
+      !Number.isFinite(ledVoltage) || ledVoltage <= 0 || ledVoltage > 5 ||
+      ledVoltage >= supplyVoltage ||
+      !Number.isFinite(targetCurrentMa) || targetCurrentMa < 1 || targetCurrentMa > 30) {
+      return { valid: false, error: 'Use a 1–24 V supply, an LED drop below the supply and no greater than 5 V, and a target current of 1–30 mA.' };
+    }
+    const currentAmps = targetCurrentMa / 1000;
+    const voltageAcrossResistor = supplyVoltage - ledVoltage;
+    const minimumResistance = voltageAcrossResistor / currentAmps;
+    const e12 = [1, 1.2, 1.5, 1.8, 2.2, 2.7, 3.3, 3.9, 4.7, 5.6, 6.8, 8.2];
+    let standardResistance = null;
+    for (let decade = 1; decade <= 1e6 && standardResistance === null; decade *= 10) {
+      standardResistance = e12.map(value => value * decade).find(value => value >= minimumResistance) || null;
+    }
+    if (!Number.isFinite(minimumResistance) || !standardResistance) {
+      return { valid: false, error: 'The required resistor is outside the supported range.' };
+    }
+    const actualCurrentMa = voltageAcrossResistor / standardResistance * 1000;
+    const resistorPower = voltageAcrossResistor ** 2 / standardResistance;
+    const powerRating = [.125, .25, .5, 1, 2].find(rating => rating >= resistorPower * 2);
+    if (![actualCurrentMa, resistorPower].every(Number.isFinite) || !powerRating) {
+      return { valid: false, error: 'The calculated resistor dissipation exceeds the supported range.' };
+    }
+    return {
+      valid: true,
+      minimumResistance: round(minimumResistance, 1),
+      standardResistance,
+      actualCurrentMa: round(actualCurrentMa, 2),
+      resistorPower: round(resistorPower, 4),
+      recommendedPowerRating: powerRating
+    };
+  }
+
+  function calculateTransistorBaseResistor(input = {}) {
+    const { controlVoltage, baseEmitterVoltage, collectorCurrentMa, forcedBeta } = input || {};
+    if (!Number.isFinite(controlVoltage) || controlVoltage < 1 || controlVoltage > 24 ||
+      !Number.isFinite(baseEmitterVoltage) || baseEmitterVoltage < .5 || baseEmitterVoltage > 1.2 ||
+      baseEmitterVoltage >= controlVoltage ||
+      !Number.isFinite(collectorCurrentMa) || collectorCurrentMa < .1 || collectorCurrentMa > 1000 ||
+      !Number.isFinite(forcedBeta) || forcedBeta < 5 || forcedBeta > 20) {
+      return { valid: false, error: 'Use a 1–24 V control supply above the 0.5–1.2 V base-emitter drop, 0.1–1000 mA collector current, and forced beta from 5 to 20.' };
+    }
+    const requiredBaseCurrentMa = collectorCurrentMa / forcedBeta;
+    const maximumResistance = (controlVoltage - baseEmitterVoltage) / (requiredBaseCurrentMa / 1000);
+    const e12 = [1, 1.2, 1.5, 1.8, 2.2, 2.7, 3.3, 3.9, 4.7, 5.6, 6.8, 8.2];
+    let standardResistance = null;
+    for (let decade = 1; decade <= 1e6; decade *= 10) {
+      const candidates = e12.map(value => value * decade).filter(value => value <= maximumResistance);
+      if (!candidates.length) break;
+      standardResistance = candidates.at(-1);
+    }
+    if (!Number.isFinite(maximumResistance) || !standardResistance) {
+      return { valid: false, error: 'The required base resistor is outside the supported range.' };
+    }
+    const actualBaseCurrentMa = (controlVoltage - baseEmitterVoltage) / standardResistance * 1000;
+    const availableCollectorCurrentMa = actualBaseCurrentMa * forcedBeta;
+    const resistorPower = (controlVoltage - baseEmitterVoltage) ** 2 / standardResistance;
+    const powerRating = [.125, .25, .5, 1, 2].find(rating => rating >= resistorPower * 2);
+    if (![actualBaseCurrentMa, availableCollectorCurrentMa, resistorPower].every(Number.isFinite) || !powerRating) {
+      return { valid: false, error: 'The calculated base-drive resistor dissipation exceeds the supported range.' };
+    }
+    return {
+      valid: true,
+      maximumResistance: round(maximumResistance, 1),
+      standardResistance,
+      requiredBaseCurrentMa: round(requiredBaseCurrentMa, 3),
+      actualBaseCurrentMa: round(actualBaseCurrentMa, 3),
+      availableCollectorCurrentMa: round(availableCollectorCurrentMa, 2),
+      resistorPower: round(resistorPower, 4),
+      recommendedPowerRating: powerRating
+    };
+  }
+
+  function calculateVoltageDivider(input = {}) {
+    const { inputVoltage, upperResistance, lowerResistance } = input || {};
+    if (!Number.isFinite(inputVoltage) || inputVoltage <= 0 || inputVoltage > 24 ||
+      !Number.isFinite(upperResistance) || upperResistance < 100 || upperResistance > 1e6 ||
+      !Number.isFinite(lowerResistance) || lowerResistance < 100 || lowerResistance > 1e6) {
+      return { valid: false, error: 'Use a 1–24 V input and resistor values from 100 Ω to 1 MΩ.' };
+    }
+    const totalResistance = upperResistance + lowerResistance;
+    const outputVoltage = inputVoltage * lowerResistance / totalResistance;
+    const currentMa = inputVoltage / totalResistance * 1000;
+    const upperPower = (inputVoltage - outputVoltage) ** 2 / upperResistance;
+    const lowerPower = outputVoltage ** 2 / lowerResistance;
+    if (![outputVoltage, currentMa, upperPower, lowerPower].every(Number.isFinite)) {
+      return { valid: false, error: 'The divider result exceeds the supported numeric range.' };
+    }
+    return {
+      valid: true,
+      outputVoltage: round(outputVoltage, 3),
+      currentMa: round(currentMa, 3),
+      upperPowerMw: round(upperPower * 1000, 3),
+      lowerPowerMw: round(lowerPower * 1000, 3),
+      unloaded: true
+    };
+  }
+
+  function calculateRcNetwork(input = {}) {
+    const { resistance, capacitance } = input || {};
+    if (!Number.isFinite(resistance) || resistance < 1000 || resistance > 1e6 ||
+      !Number.isFinite(capacitance) || capacitance < 1e-9 || capacitance > 1e-3) {
+      return { valid: false, error: 'Use resistance from 1 kΩ to 1 MΩ and capacitance from 1 nF to 1000 µF.' };
+    }
+    const timeConstant = resistance * capacitance;
+    const cutoffFrequency = 1 / (2 * Math.PI * (timeConstant / 10));
+    if (![timeConstant, cutoffFrequency].every(Number.isFinite)) {
+      return { valid: false, error: 'The RC result exceeds the supported numeric range.' };
+    }
+    return {
+      valid: true,
+      timeConstant: round(timeConstant, 6),
+      approximateSettlingTime: round(timeConstant * 5, 6),
+      cutoffFrequency: round(cutoffFrequency, 3)
+    };
+  }
+
+  function validatePlcProgram(program) {
+    if (!program || !Array.isArray(program.rungs) || program.rungs.length < 1 || program.rungs.length > 8) {
+      return { valid: false, error: 'A PLC program must contain between 1 and 8 rungs.' };
+    }
+    const coils = new Set();
+    for (const rung of program.rungs) {
+      if (!rung || !Array.isArray(rung.branches) || rung.branches.length < 1 || rung.branches.length > 4 ||
+        typeof rung.coil !== 'string' || !/^Q\d{1,2}\.\d$/.test(rung.coil)) {
+        return { valid: false, error: 'Each rung needs 1–4 branches and one valid output coil.' };
+      }
+      if (coils.has(rung.coil)) return { valid: false, error: `Output ${rung.coil} is assigned to more than one rung.` };
+      coils.add(rung.coil);
+      for (const branch of rung.branches) {
+        if (!Array.isArray(branch) || branch.length < 1 || branch.length > 6) {
+          return { valid: false, error: 'Each ladder branch needs between 1 and 6 contacts.' };
+        }
+        for (const contact of branch) {
+          if (!contact || typeof contact.tag !== 'string' ||
+            !/^[IQ]\d{1,2}\.\d$/.test(contact.tag) ||
+            typeof contact.normallyClosed !== 'boolean') {
+            return { valid: false, error: 'Contacts need a valid I/O tag and contact type.' };
+          }
+        }
+      }
+    }
+    return { valid: true };
+  }
+
+  function calculatePlcScan(program, inputImage = {}, previousOutputs = {}) {
+    const validation = validatePlcProgram(program);
+    if (!validation.valid) return validation;
+    if (!inputImage || typeof inputImage !== 'object' || Array.isArray(inputImage) ||
+      !previousOutputs || typeof previousOutputs !== 'object' || Array.isArray(previousOutputs)) {
+      return { valid: false, error: 'PLC input and output images must be tag/value objects.' };
+    }
+    if ([inputImage, previousOutputs].some(image =>
+      Object.values(image).some(value => typeof value !== 'boolean'))) {
+      return { valid: false, error: 'PLC input and output image values must be boolean.' };
+    }
+
+    const outputs = { ...previousOutputs };
+    const readContact = contact => {
+      const image = contact.tag.startsWith('I') ? inputImage : outputs;
+      const signal = image[contact.tag] === true;
+      return contact.normallyClosed ? !signal : signal;
+    };
+    const rungStates = program.rungs.map(rung => {
+      const branches = rung.branches.map(branch => branch.every(readContact));
+      const energised = branches.some(Boolean);
+      outputs[rung.coil] = energised;
+      return { branches, energised, coil: rung.coil };
+    });
+    const programOutputs = Object.fromEntries(program.rungs.map(rung => [rung.coil, outputs[rung.coil]]));
+    return { valid: true, rungStates, outputs: programOutputs };
+  }
+
+  return {
+    calculateLoadSizing, calculateScheduleSizing, calculateMotorDesign,
+    calculateLedResistor, calculateTransistorBaseResistor,
+    calculateVoltageDivider, calculateRcNetwork,
+    validatePlcProgram, calculatePlcScan
+  };
 }));
