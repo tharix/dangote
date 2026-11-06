@@ -368,6 +368,56 @@ const standardsReviewChecks = [
   { id: 'verification', title: 'Inspection and verification', description: 'Review inspection, testing, measured results, methods, and records required for the project.' },
   { id: 'documentation', title: 'Drawings and handover', description: 'Review drawings, schedules, labels, certificates, deviations, and outstanding actions.' }
 ];
+const standardsReviewCrosswalk = [
+  {
+    topic: 'Load, current, and schedule demand',
+    model: 'Load sizing and load schedule apply nominal 230/400 V assumptions, power factor, and user-entered diversity.',
+    references: 'NESIS 2015 sections 7.2.2, 7.2.11.5-7.2.11.6 (PDF pp. 162, 204-205).',
+    review: 'Confirm supply basis and circuit category. NESIS distinguishes final sub-circuits from other circuits for diversity; verify whether the model applies diversity in a justified way for each use.'
+  },
+  {
+    topic: 'Cable capacity, installation, and voltage drop',
+    model: 'Cable ampacity, installation-method capacity, ambient/grouping factors, and voltage-drop constants are demonstration tables.',
+    references: 'NESIS 2015 section 7.2.3 (PDF pp. 162-164); section 10.3.1(c) (PDF pp. 246-247).',
+    review: 'Identify the governing NIS/IEC or other adopted tables and editions; verify conductor type, installation method, correction factors, circuit conditions, and voltage-drop criteria. Current demo constants have no verified standards source.'
+  },
+  {
+    topic: 'Overcurrent and fault protection',
+    model: 'Breaker selection compares load current with the demo cable-capacity table; the app does not calculate prospective fault current or device curves.',
+    references: 'NESIS 2015 sections 7.2.11.2, 7.2.14.1 (PDF pp. 200-202, 219-220).',
+    review: 'Assess breaking capacity, short-circuit withstand, discrimination/coordination, conductor protection, device characteristics, and required disconnection conditions. A nominal rating match alone is insufficient evidence.'
+  },
+  {
+    topic: 'Motor feeder and starting',
+    model: 'Motor estimate uses power, efficiency, power factor, and a user-selected starting-current multiplier.',
+    references: 'NESIS 2015 sections 7.2.11.9, 7.2.14.2 (PDF pp. 209-210, 220).',
+    review: 'Verify the applicable motor and starter rules, nameplate data, starting conditions, conductor sizing, overload/fault protection, isolation, and coordination. The demo multiplier is not a verified limit.'
+  },
+  {
+    topic: 'Earthing, bonding, and earth-leakage protection',
+    model: 'Circuit checks are topology heuristics; the app does not calculate earthing, electrode resistance, loop impedance, or RCD trip performance.',
+    references: 'NESIS 2015 Chapter 11, including sections 11.1, 11.5, 11.6 (PDF pp. 252-256); section 10.3.2 (PDF p. 247 onward).',
+    review: 'Identify the applicable earthing arrangement and adopted rules; independently review conductor sizing, bonding, fault protection, device selection, and required measured test evidence.'
+  },
+  {
+    topic: 'Inspection and verification',
+    model: 'The application stores user-entered installation notes and produces training reports; it performs no physical inspection or electrical tests.',
+    references: 'NESIS 2015 sections 10.3.1-10.3.2 (PDF pp. 246-248 onward).',
+    review: 'Have an authorized competent person determine applicable inspection, test methods, sequence, acceptance criteria, certification, and authority approvals for the actual installation.'
+  },
+  {
+    topic: 'Document status and applicable editions',
+    model: 'The supplied NESIS document is a 2015 publication; its normative references list BS 7671:2008 and several NIS IEC documents.',
+    references: 'NESIS 2015 sections 1.2-1.3 (PDF pp. 12-15); current NEMSA regulations page: https://web.nemsa.gov.ng/regulations.',
+    review: 'Confirm current legal status, amendments, referenced national adoptions, and replacement editions with the relevant Nigerian authority before using any clause as a current design basis.'
+  },
+  {
+    topic: 'ECOWAS source supplied',
+    model: 'The supplied ECOWAS PDF identifies itself as the ECOWAS Energy Policy, updated version (69 PDF pages). It is policy context, not a wiring-installation code.',
+    references: 'ECOWAS Energy Policy, updated version, supplied PDF: https://eis.ecowas.int/assets/front/medias/doc/media_20231011104957.pdf.',
+    review: 'Do not use this policy document as a source for cable ampacity, protection, or installation acceptance criteria. Identify any separate adopted ECOWAS/NIS technical standards if applicable.'
+  }
+];
 const standardsReviewStatuses = ['not-reviewed', 'reviewed-acceptable', 'action-required', 'awaiting-evidence', 'not-applicable'];
 const standardsReviewStorageKey = 'dangote-academy-standards-review';
 const guidedLessons = [
@@ -2059,6 +2109,10 @@ function getDefaultStandardsReviewSnapshot() {
   };
 }
 
+function getStandardsReviewCrosswalk() {
+  return standardsReviewCrosswalk.map(item => ({ ...item }));
+}
+
 function isValidStandardsReviewSnapshot(review) {
   const textLimits = {
     jurisdiction: 120,
@@ -2129,6 +2183,9 @@ function renderStandardsReview(review = getDefaultStandardsReviewSnapshot()) {
   $('#standards-review-date').value = review.reviewDate;
   $('#standards-source-references').value = review.sourceReferences;
   $('#standards-reviewer-declaration').checked = review.reviewerDeclaration;
+  $('#standards-crosswalk-list').innerHTML = standardsReviewCrosswalk.map(item =>
+    `<article class="standards-crosswalk-item"><h5>${escapeHtml(item.topic)}</h5><p><strong>Current model:</strong> ${escapeHtml(item.model)}</p><p><strong>Source pointers:</strong> ${escapeHtml(item.references)}</p><p><strong>Reviewer action:</strong> ${escapeHtml(item.review)}</p><span class="demo-note">Review required; no compliance conclusion</span></article>`
+  ).join('');
   const byId = new Map(review.checks.map(item => [item.id, item]));
   $('#standards-review-checks').innerHTML = standardsReviewChecks.map(check => {
     const item = byId.get(check.id);
@@ -2934,7 +2991,8 @@ function buildEngineeringReport() {
       commissioning: getCommissioningSnapshot(),
       standardsReview: {
         ...getStandardsReviewSnapshot(),
-        recordStatus: standardsReviewRecordStatus(getStandardsReviewSnapshot())
+        recordStatus: standardsReviewRecordStatus(getStandardsReviewSnapshot()),
+        formulaCrosswalk: standardsReviewCrosswalk
       },
       commissioningSummary: {
         total: commissioningChecks.length,
@@ -3207,7 +3265,11 @@ function exportEngineeringReportPdf() {
       ...project.standardsReview.checks.map(item => {
         const check = standardsReviewChecks.find(entry => entry.id === item.id);
         return [check?.title || item.id, `${item.status}${item.note ? ` | ${item.note}` : ''}`];
-      })
+      }),
+      ...project.standardsReview.formulaCrosswalk.map(item => [
+        `Review map: ${item.topic}`,
+        `${item.references} ${item.review}`
+      ])
     ]);
     addEngineeringPdfTable(doc, 'Learner progress', reportRows(report.learning.progress));
     addEngineeringPdfTable(doc, 'Review history', (project.review || []).map(item => [

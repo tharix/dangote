@@ -560,13 +560,17 @@
       ['standards review record is explicit, validated, saved with projects, and never claims app verification', () => {
         const app = testApp();
         const defaults = app.getDefaultStandardsReviewSnapshot();
+        const crosswalk = app.getStandardsReviewCrosswalk();
         if (!app.isValidStandardsReviewSnapshot(defaults) ||
           app.standardsReviewRecordStatus(defaults) !== 'Record incomplete' ||
           defaults.jurisdiction !== 'Nigeria' ||
           defaults.edition !== '2015' ||
           !defaults.standard.includes('proposed basis') ||
           !defaults.sourceReferences.includes('nemsa.gov.ng/wp-content/uploads/2019/11/NESIS-Regulations-2015-1-1.pdf') ||
-          defaults.reviewerName !== '' || defaults.reviewerDeclaration) return false;
+          defaults.reviewerName !== '' || defaults.reviewerDeclaration ||
+          crosswalk.length < 7 ||
+          !crosswalk.find(item => item.topic === 'Load, current, and schedule demand')?.review.includes('diversity') ||
+          !crosswalk.find(item => item.topic === 'ECOWAS source supplied')?.model.includes('not a wiring-installation code')) return false;
         app.document.querySelector('#standards-jurisdiction').value = 'Test jurisdiction';
         app.document.querySelector('#standards-name').value = 'Example standard for test only';
         app.document.querySelector('#standards-edition').value = '2026';
@@ -609,6 +613,7 @@
           snapshot.standardsReview.checks.length === 8 &&
           app.standardsReviewRecordStatus(snapshot.standardsReview) === 'External review recorded; compliance not verified by this app' &&
           report.project.standardsReview.recordStatus.includes('compliance not verified') &&
+          report.project.standardsReview.formulaCrosswalk.length === crosswalk.length &&
           report.engineeringNotice.includes('no qualified engineering') && invalidRejected;
       }],
       ['full workspace backup includes app data and rejects unknown storage keys', () => {

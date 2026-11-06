@@ -841,6 +841,14 @@ button:disabled { cursor: not-allowed; opacity: .68; }
 .cloud-project-evidence { flex: 1 1 100%; }
 .cloud-project-evidence pre { max-height: 260px; overflow: auto; padding: 10px; white-space: pre-wrap; overflow-wrap: anywhere; background: var(--canvas); font-size: 11px; }
 .standards-review-panel { display: grid; gap: 16px; margin-top: 20px; }
+.standards-crosswalk { display: grid; gap: 12px; padding: 18px; border: 1px solid var(--line); border-left: 4px solid #c28718; border-radius: 12px; background: #fffaf0; }
+.standards-crosswalk h4 { margin: 0; }
+.standards-crosswalk > p { margin: 0; }
+.standards-crosswalk-list { display: grid; gap: 10px; }
+.standards-crosswalk-item { display: grid; gap: 6px; padding: 13px; border: 1px solid var(--line); border-radius: 10px; background: white; }
+.standards-crosswalk-item h5, .standards-crosswalk-item p { margin: 0; }
+.standards-crosswalk-item p { font-size: 13px; overflow-wrap: anywhere; }
+.standards-crosswalk-item .demo-note { justify-self: start; }
 .standards-review-fields { grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); }
 .standards-review-panel > label { display: grid; gap: 7px; }
 .standards-review-panel .standards-declaration { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: start; gap: 9px; }
