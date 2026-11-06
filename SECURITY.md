@@ -29,3 +29,10 @@ Before using real learner data, apply and review the Supabase policies and
 workflow triggers in `supabase/schema.sql` on a test project. The local role
 selector is not an authorization control. Report problems with access control
 or exposure of student data through the private reporting channel above.
+
+The standards-review record can contain reviewer names, credentials, and
+document references. It is stored with local projects and may be included in
+exports, backups, or configured cloud submissions; enter only information
+approved for those storage locations and keep exported files private. Reviewer
+credentials and standards references are self-reported and are not verified by
+the application.

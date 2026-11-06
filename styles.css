@@ -840,6 +840,22 @@ button:disabled { cursor: not-allowed; opacity: .68; }
 .cloud-project-row textarea { min-height: 42px; }
 .cloud-project-evidence { flex: 1 1 100%; }
 .cloud-project-evidence pre { max-height: 260px; overflow: auto; padding: 10px; white-space: pre-wrap; overflow-wrap: anywhere; background: var(--canvas); font-size: 11px; }
+.standards-review-panel { display: grid; gap: 16px; margin-top: 20px; }
+.standards-review-fields { grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); }
+.standards-review-panel > label { display: grid; gap: 7px; }
+.standards-review-panel .standards-declaration { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: start; gap: 9px; }
+.standards-declaration > span { min-width: 0; }
+.standards-declaration input { flex: 0 0 auto; margin-top: 5px; }
+.standards-review-subheading { margin-top: 8px; }
+.standards-review-subheading h4 { margin: 0; }
+.standards-review-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.standards-review-card { display: grid; align-content: start; gap: 12px; padding: 16px; border: 1px solid var(--line); border-radius: 12px; }
+.standards-review-card h4 { margin: 0; }
+.standards-review-card p { margin: 5px 0 0; color: var(--muted); font-size: 13px; }
+.standards-review-card label { display: grid; gap: 6px; }
+@media (max-width: 720px) {
+  .standards-review-grid { grid-template-columns: 1fr; }
+}
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     scroll-behavior: auto !important;

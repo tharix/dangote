@@ -557,6 +557,55 @@
           report.project.scheduleInputs.rows.length > 0 && report.project.scheduleValidation.valid &&
           report.learning.progress && Number.isInteger(report.learning.progress.attempts);
       }],
+      ['standards review record is explicit, validated, saved with projects, and never claims app verification', () => {
+        const app = testApp();
+        const defaults = app.getDefaultStandardsReviewSnapshot();
+        if (!app.isValidStandardsReviewSnapshot(defaults) ||
+          app.standardsReviewRecordStatus(defaults) !== 'Record incomplete') return false;
+        app.document.querySelector('#standards-jurisdiction').value = 'Test jurisdiction';
+        app.document.querySelector('#standards-name').value = 'Example standard for test only';
+        app.document.querySelector('#standards-edition').value = '2026';
+        app.document.querySelector('#standards-reviewer-name').value = 'Qualified Reviewer';
+        app.document.querySelector('#standards-reviewer-qualification').value = 'Test credential';
+        app.document.querySelector('#standards-review-date').value = '2026-11-06';
+        app.document.querySelector('#standards-reviewer-declaration').checked = true;
+        app.document.querySelectorAll('.standards-review-status').forEach(select => {
+          select.value = 'reviewed-acceptable';
+        });
+        const awaitingEvidenceIsIncomplete = (() => {
+          const firstCheck = app.document.querySelector('.standards-review-status');
+          firstCheck.value = 'awaiting-evidence';
+          const incomplete = app.standardsReviewRecordStatus(app.getStandardsReviewSnapshot()) === 'Record incomplete';
+          firstCheck.value = 'reviewed-acceptable';
+          return incomplete;
+        })();
+        app.persistStandardsReviewDraft();
+        app.document.querySelector('#project-name').value = 'Standards review test';
+        app.saveNamedProject();
+        const saved = app.getSavedProjects().find(project => project.name === 'Standards review test');
+        app.document.querySelector('#standards-name').value = 'Unsaved change';
+        app.document.querySelector('#project-list').value = 'Standards review test';
+        app.loadNamedProject();
+        const snapshot = app.projectSnapshot('Standards review test');
+        app.validateProjectWorkspace(snapshot);
+        const report = app.buildEngineeringReport();
+        const record = JSON.parse(app.localStorage.getItem('dangote-academy-standards-review'));
+        const invalid = { ...snapshot.standardsReview, reviewDate: 'not-a-date' };
+        let invalidRejected = false;
+        try {
+          app.validateProjectWorkspace({ ...snapshot, standardsReview: invalid });
+        } catch {
+          invalidRejected = true;
+        }
+        return record.standard === 'Example standard for test only' &&
+          awaitingEvidenceIsIncomplete &&
+          saved.standardsReview.standard === 'Example standard for test only' &&
+          app.document.querySelector('#standards-name').value === 'Example standard for test only' &&
+          snapshot.standardsReview.checks.length === 8 &&
+          app.standardsReviewRecordStatus(snapshot.standardsReview) === 'External review recorded; compliance not verified by this app' &&
+          report.project.standardsReview.recordStatus.includes('compliance not verified') &&
+          report.engineeringNotice.includes('no qualified engineering') && invalidRejected;
+      }],
       ['full workspace backup includes app data and rejects unknown storage keys', () => {
         const app = testApp();
         app.localStorage.setItem('dangote-academy-lessons', JSON.stringify({ 'safe-topology': { completedAt: '2026-01-01' } }));

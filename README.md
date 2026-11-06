@@ -77,6 +77,8 @@ The project workspace can export a unified engineering report as JSON or PDF con
 
 Offline role selection and role-based controls are local workflow conveniences only and must not be used as a security boundary. When Supabase is configured, cloud authorization is based on the server-managed profile and cohort membership policies, not on the local role selector. Until a project is configured, the cloud dashboard and server-side authorization are unavailable. Have a qualified electrical designer review the calculation methods against the applicable local standard before relying on them for any real project.
 
+The Installation & Commissioning module includes a standards-basis and external-review record for the jurisdiction, exact standard and edition, amendments, reviewer credentials, declaration, evidence references, and reviewer-entered topic outcomes. The record is autosaved locally, travels with named projects and revisions, is included in full-device backups, and appears in unified JSON/PDF reports. It does not contain code interpretations, verify credentials or citations, calculate compliance, or certify a design. Do not mark an outcome as acceptable unless a qualified reviewer has assessed the project evidence against the governing requirements. No electrical sizing formulas are presented as code-compliant by this workflow.
+
 ### Enabling optional cloud accounts
 
 1. Create a Supabase project and apply [supabase/schema.sql](./supabase/schema.sql) in its SQL editor.

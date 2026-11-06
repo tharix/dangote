@@ -358,6 +358,18 @@ const commissioningChecks = [
   { id: 'handover', title: 'Records and handover', description: 'As-built drawings, schedules, labels, certificates, and outstanding actions handed over.' }
 ];
 const commissioningStatuses = ['not-recorded', 'recorded', 'review'];
+const standardsReviewChecks = [
+  { id: 'design-basis', title: 'Design basis and assumptions', description: 'Confirm the project scope, supply characteristics, design assumptions, and applicable documents.' },
+  { id: 'demand', title: 'Load assessment', description: 'Review connected loads, demand assumptions, diversity, phase allocation, and schedules.' },
+  { id: 'conductors', title: 'Conductors and voltage drop', description: 'Review conductor material, installation conditions, correction factors, capacity, and voltage drop.' },
+  { id: 'protection', title: 'Overcurrent and fault protection', description: 'Review protective-device selection, coordination, disconnection, and fault calculations.' },
+  { id: 'earthing', title: 'Earthing and bonding', description: 'Review earthing arrangement, protective conductors, bonding, and associated evidence.' },
+  { id: 'special-locations', title: 'Environmental and special conditions', description: 'Review external influences, locations, equipment ratings, and any project-specific requirements.' },
+  { id: 'verification', title: 'Inspection and verification', description: 'Review inspection, testing, measured results, methods, and records required for the project.' },
+  { id: 'documentation', title: 'Drawings and handover', description: 'Review drawings, schedules, labels, certificates, deviations, and outstanding actions.' }
+];
+const standardsReviewStatuses = ['not-reviewed', 'reviewed-acceptable', 'action-required', 'awaiting-evidence', 'not-applicable'];
+const standardsReviewStorageKey = 'dangote-academy-standards-review';
 const guidedLessons = [
   { id: 'safe-topology', title: 'Build a protected lighting circuit', objective: 'Create a valid source → MCB → lamp circuit using a phase conductor.', hint: 'Use AC mains, MCB, and Lamp, then connect both wires as line or Phase A/B/C.', check: () => validateCircuit() },
   { id: 'balanced-phases', title: 'Balance a three-phase schedule', objective: 'Assign equal diversified loads to Phase A, Phase B, and Phase C.', hint: 'Open Load Schedule, choose three-phase, and use equal loads on each phase.', check: () => Number($('#schedule-phase')?.value) === 3 && ['phase-a', 'phase-b', 'phase-c'].every(phase => $$('.schedule-row-phase').some(select => select.value === phase)) },
@@ -377,6 +389,7 @@ const workspaceBackupStorageKeys = [
   'dangote-academy-boq',
   'dangote-academy-circuit',
   'dangote-academy-installation',
+  'dangote-academy-standards-review',
   'dangote-academy-lessons',
   'dangote-academy-troubleshooting',
   'dangote-academy-station-diagnostics',
@@ -1058,6 +1071,7 @@ function loadCloudProjectToDevice(projectId) {
       calculation: existing.calculation || null,
       motorDesign: existing.motorDesign || null,
       commissioning: existing.commissioning || getDefaultCommissioningSnapshot(),
+      standardsReview: existing.standardsReview || getDefaultStandardsReviewSnapshot(),
       status: existing.status || 'draft'
     });
   }
@@ -1072,6 +1086,7 @@ function loadCloudProjectToDevice(projectId) {
     calculationInputs: remote.workspace.calculationInputs || null,
     motorDesignInputs: remote.workspace.motorDesignInputs || null,
     commissioning: remote.workspace.commissioning || getDefaultCommissioningSnapshot(),
+    standardsReview: remote.workspace.standardsReview || getDefaultStandardsReviewSnapshot(),
     owner: { name: sessionProfile.display_name || getCloudSession()?.user.email || 'Learner', role: sessionProfile.role },
     cloudUserId: remote.owner_id,
     cloudCohortId: remote.cohort_id,
@@ -1139,6 +1154,7 @@ async function syncSubmittedProjectToCloud(project) {
       calculationInputs: project.calculationInputs,
       motorDesignInputs: project.motorDesignInputs,
       commissioning: project.commissioning,
+      standardsReview: project.standardsReview || getDefaultStandardsReviewSnapshot(),
       learningProgress: getStudentProgressSummary()
     };
     let remoteProject = matches?.[0];
@@ -1559,7 +1575,8 @@ function submitNamedProject() {
     JSON.stringify(project.schedule || null) !== JSON.stringify(activeSnapshot.schedule) ||
     JSON.stringify(project.calculationInputs || null) !== JSON.stringify(activeSnapshot.calculationInputs) ||
     JSON.stringify(project.motorDesignInputs || null) !== JSON.stringify(activeSnapshot.motorDesignInputs) ||
-    JSON.stringify(project.commissioning || getDefaultCommissioningSnapshot()) !== JSON.stringify(activeSnapshot.commissioning)) {
+    JSON.stringify(project.commissioning || getDefaultCommissioningSnapshot()) !== JSON.stringify(activeSnapshot.commissioning) ||
+    JSON.stringify(project.standardsReview || getDefaultStandardsReviewSnapshot()) !== JSON.stringify(activeSnapshot.standardsReview)) {
     showToast('Save the latest project changes before submitting.');
     return false;
   }
@@ -2019,6 +2036,139 @@ function getSavedCommissioningDraft() {
   }
 }
 
+function getDefaultStandardsReviewSnapshot() {
+  return {
+    jurisdiction: '',
+    standard: '',
+    edition: '',
+    amendments: '',
+    reviewerName: '',
+    reviewerQualification: '',
+    reviewerOrganization: '',
+    reviewDate: '',
+    sourceReferences: '',
+    reviewerDeclaration: false,
+    checks: standardsReviewChecks.map(check => ({ id: check.id, status: 'not-reviewed', note: '' }))
+  };
+}
+
+function isValidStandardsReviewSnapshot(review) {
+  const textLimits = {
+    jurisdiction: 120,
+    standard: 180,
+    edition: 100,
+    amendments: 300,
+    reviewerName: 100,
+    reviewerQualification: 160,
+    reviewerOrganization: 140,
+    sourceReferences: 600
+  };
+  return Boolean(review && typeof review === 'object' && !Array.isArray(review) &&
+    Object.entries(textLimits).every(([key, maxLength]) =>
+      typeof review[key] === 'string' && review[key].length <= maxLength) &&
+    typeof review.reviewerDeclaration === 'boolean' &&
+    typeof review.reviewDate === 'string' &&
+    (review.reviewDate === '' || /^\d{4}-\d{2}-\d{2}$/.test(review.reviewDate)) &&
+    Array.isArray(review.checks) && review.checks.length === standardsReviewChecks.length &&
+    new Set(review.checks.map(item => item?.id)).size === standardsReviewChecks.length &&
+    review.checks.every(item => standardsReviewChecks.some(check => check.id === item?.id) &&
+      standardsReviewStatuses.includes(item.status) &&
+      typeof item.note === 'string' && item.note.length <= 500));
+}
+
+function getStandardsReviewSnapshot() {
+  const checks = standardsReviewChecks.map(check => {
+    const card = $(`[data-standards-check="${check.id}"]`);
+    return {
+      id: check.id,
+      status: $('.standards-review-status', card)?.value || 'not-reviewed',
+      note: $('.standards-review-note', card)?.value || ''
+    };
+  });
+  return {
+    jurisdiction: $('#standards-jurisdiction')?.value.trim() || '',
+    standard: $('#standards-name')?.value.trim() || '',
+    edition: $('#standards-edition')?.value.trim() || '',
+    amendments: $('#standards-amendments')?.value.trim() || '',
+    reviewerName: $('#standards-reviewer-name')?.value.trim() || '',
+    reviewerQualification: $('#standards-reviewer-qualification')?.value.trim() || '',
+    reviewerOrganization: $('#standards-reviewer-organization')?.value.trim() || '',
+    reviewDate: $('#standards-review-date')?.value || '',
+    sourceReferences: $('#standards-source-references')?.value.trim() || '',
+    reviewerDeclaration: $('#standards-reviewer-declaration')?.checked || false,
+    checks
+  };
+}
+
+function standardsReviewRecordStatus(review) {
+  const completeBasis = Boolean(review.jurisdiction && review.standard && review.edition);
+  const completeReviewer = Boolean(review.reviewerName && review.reviewerQualification &&
+    review.reviewDate && review.reviewerDeclaration);
+  const resolvedChecks = review.checks.every(item =>
+    ['reviewed-acceptable', 'action-required', 'not-applicable'].includes(item.status));
+  if (!completeBasis || !completeReviewer || !resolvedChecks) return 'Record incomplete';
+  return 'External review recorded; compliance not verified by this app';
+}
+
+function renderStandardsReview(review = getDefaultStandardsReviewSnapshot()) {
+  if (!isValidStandardsReviewSnapshot(review)) throw new Error('Invalid standards review record.');
+  $('#standards-jurisdiction').value = review.jurisdiction;
+  $('#standards-name').value = review.standard;
+  $('#standards-edition').value = review.edition;
+  $('#standards-amendments').value = review.amendments;
+  $('#standards-reviewer-name').value = review.reviewerName;
+  $('#standards-reviewer-qualification').value = review.reviewerQualification;
+  $('#standards-reviewer-organization').value = review.reviewerOrganization;
+  $('#standards-review-date').value = review.reviewDate;
+  $('#standards-source-references').value = review.sourceReferences;
+  $('#standards-reviewer-declaration').checked = review.reviewerDeclaration;
+  const byId = new Map(review.checks.map(item => [item.id, item]));
+  $('#standards-review-checks').innerHTML = standardsReviewChecks.map(check => {
+    const item = byId.get(check.id);
+    return `<article class="standards-review-card" data-standards-check="${check.id}"><div><h4>${escapeHtml(check.title)}</h4><p>${escapeHtml(check.description)}</p></div><label>Reviewer-entered outcome<select class="standards-review-status"><option value="not-reviewed" ${item.status === 'not-reviewed' ? 'selected' : ''}>Not reviewed</option><option value="reviewed-acceptable" ${item.status === 'reviewed-acceptable' ? 'selected' : ''}>Reviewer marked acceptable</option><option value="action-required" ${item.status === 'action-required' ? 'selected' : ''}>Action required</option><option value="awaiting-evidence" ${item.status === 'awaiting-evidence' ? 'selected' : ''}>Awaiting evidence</option><option value="not-applicable" ${item.status === 'not-applicable' ? 'selected' : ''}>Not applicable (reviewer decision)</option></select></label><label>Evidence reference or action note<textarea class="standards-review-note" maxlength="500" rows="2" placeholder="Use a drawing, calculation, test record, or action reference; avoid confidential data">${escapeHtml(item.note)}</textarea></label></article>`;
+  }).join('');
+  updateStandardsReviewStatus();
+}
+
+function updateStandardsReviewStatus() {
+  const review = getStandardsReviewSnapshot();
+  const counts = standardsReviewStatuses.reduce((result, status) => {
+    result[status] = review.checks.filter(item => item.status === status).length;
+    return result;
+  }, {});
+  const done = counts['reviewed-acceptable'] + counts['action-required'] + counts['not-applicable'];
+  $('#standards-review-progress').textContent =
+    `${done} / ${standardsReviewChecks.length} topics recorded · ${counts['action-required']} actions · ${counts['awaiting-evidence']} awaiting evidence`;
+  $('#standards-review-record-status').textContent = standardsReviewRecordStatus(review);
+}
+
+function persistStandardsReviewDraft() {
+  const review = getStandardsReviewSnapshot();
+  localStorage.setItem(standardsReviewStorageKey, JSON.stringify(review));
+  updateStandardsReviewStatus();
+}
+
+function restoreStandardsReview(review) {
+  const restored = review || getDefaultStandardsReviewSnapshot();
+  if (!isValidStandardsReviewSnapshot(restored)) throw new Error('Invalid standards review record.');
+  renderStandardsReview(restored);
+  persistStandardsReviewDraft();
+}
+
+function getSavedStandardsReviewDraft() {
+  const saved = localStorage.getItem(standardsReviewStorageKey);
+  if (!saved) return getDefaultStandardsReviewSnapshot();
+  try {
+    const review = JSON.parse(saved);
+    if (!isValidStandardsReviewSnapshot(review)) throw new Error('Saved standards review has an unsupported format.');
+    return review;
+  } catch (error) {
+    console.error('Saved standards review could not be restored.', error);
+    showToast('Saved standards review data is invalid; a new review record was opened.');
+    return getDefaultStandardsReviewSnapshot();
+  }
+}
+
 function calculateLoad(event) {
   event?.preventDefault();
   clearEngineeringPlot('load-sizing-plot', 'Enter valid load inputs to plot the design current.');
@@ -2337,6 +2487,7 @@ function projectSnapshot(name) {
       calculation: lastCalculation,
       motorDesign: lastMotorDesign,
       commissioning: getCommissioningSnapshot(),
+      standardsReview: getStandardsReviewSnapshot(),
       owner: getProfile(),
       status: 'draft',
       comments: '',
@@ -2370,6 +2521,9 @@ function validateProjectWorkspace(project) {
   if (project.commissioning && !isValidCommissioningSnapshot(project.commissioning)) {
     throw new Error('Invalid project installation record.');
   }
+  if (project.standardsReview && !isValidStandardsReviewSnapshot(project.standardsReview)) {
+    throw new Error('Invalid project standards review record.');
+  }
 }
 
 function refreshProjectList() {
@@ -2399,6 +2553,7 @@ function saveNamedProject() {
     JSON.stringify(previous.calculationInputs || null) !== JSON.stringify(project.calculationInputs) ||
     JSON.stringify(previous.motorDesignInputs || null) !== JSON.stringify(project.motorDesignInputs) ||
     JSON.stringify(previous.commissioning || getDefaultCommissioningSnapshot()) !== JSON.stringify(project.commissioning) ||
+    JSON.stringify(previous.standardsReview || getDefaultStandardsReviewSnapshot()) !== JSON.stringify(project.standardsReview) ||
     JSON.stringify(previous.plc || null) !== JSON.stringify(project.plc)
   ));
   project.status = changed && ['submitted', 'approved'].includes(previous?.status)
@@ -2422,6 +2577,7 @@ function saveNamedProject() {
       calculation: previous.calculation || null,
       motorDesign: previous.motorDesign || null,
       commissioning: previous.commissioning || getDefaultCommissioningSnapshot(),
+      standardsReview: previous.standardsReview || getDefaultStandardsReviewSnapshot(),
       status: previous.status || 'draft'
     });
     if (['submitted', 'approved'].includes(previous.status)) {
@@ -2484,6 +2640,7 @@ function compareProjectRevisions() {
     calculationChanged: JSON.stringify(project.calculationInputs || null) !== JSON.stringify(target.calculationInputs || null),
     motorDesignChanged: JSON.stringify(project.motorDesignInputs || null) !== JSON.stringify(target.motorDesignInputs || null),
     commissioningChanged: JSON.stringify(project.commissioning || getDefaultCommissioningSnapshot()) !== JSON.stringify(target.commissioning || getDefaultCommissioningSnapshot()),
+    standardsReviewChanged: JSON.stringify(project.standardsReview || getDefaultStandardsReviewSnapshot()) !== JSON.stringify(target.standardsReview || getDefaultStandardsReviewSnapshot()),
     plcChanged: JSON.stringify(project.plc || null) !== JSON.stringify(target.plc || null),
     reviewStatusChanged: (project.status || 'draft') !== (target.status || 'draft'),
     boqItems: `${targetRows.length} → ${currentRows.length}`,
@@ -2491,7 +2648,7 @@ function compareProjectRevisions() {
     connections: `${targetConnections.length} → ${currentConnections.length}`,
     loads: `${target.schedule?.rows?.length || 0} → ${project.schedule?.rows?.length || 0}`
   };
-  output.textContent = `Revision ${index + 1}: ${result.boqChanged ? 'BOQ changed' : 'BOQ unchanged'} · ${result.circuitChanged ? 'Circuit changed' : 'Circuit unchanged'} · ${result.plcChanged ? 'PLC program changed' : 'PLC program unchanged'} · ${result.scheduleChanged ? 'Load schedule changed' : 'Load schedule unchanged'} · ${result.calculationChanged ? 'Sizing inputs changed' : 'Sizing inputs unchanged'} · ${result.motorDesignChanged ? 'Motor design changed' : 'Motor design unchanged'} · ${result.commissioningChanged ? 'Installation record changed' : 'Installation record unchanged'} · review status ${result.reviewStatusChanged ? 'changed' : 'unchanged'} · items ${result.boqItems} · components ${result.components} · connections ${result.connections} · schedule rows ${result.loads}`;
+  output.textContent = `Revision ${index + 1}: ${result.boqChanged ? 'BOQ changed' : 'BOQ unchanged'} · ${result.circuitChanged ? 'Circuit changed' : 'Circuit unchanged'} · ${result.plcChanged ? 'PLC program changed' : 'PLC program unchanged'} · ${result.scheduleChanged ? 'Load schedule changed' : 'Load schedule unchanged'} · ${result.calculationChanged ? 'Sizing inputs changed' : 'Sizing inputs unchanged'} · ${result.motorDesignChanged ? 'Motor design changed' : 'Motor design unchanged'} · ${result.commissioningChanged ? 'Installation record changed' : 'Installation record unchanged'} · standards review ${result.standardsReviewChanged ? 'changed' : 'unchanged'} · review status ${result.reviewStatusChanged ? 'changed' : 'unchanged'} · items ${result.boqItems} · components ${result.components} · connections ${result.connections} · schedule rows ${result.loads}`;
   return result;
 }
 
@@ -2527,6 +2684,7 @@ function restoreProjectRevision() {
   if (revision.motorDesignInputs) restoreMotorDesignInputs(revision.motorDesignInputs);
   else calculateMotorFeeder();
   restoreCommissioningChecks(revision.commissioning || getDefaultCommissioningSnapshot());
+  restoreStandardsReview(revision.standardsReview || getDefaultStandardsReviewSnapshot());
   if (revision.plc) restorePlcSnapshot(revision.plc);
   showToast(`Revision ${index + 1} restored to the workspace. Save the project to keep it.`);
 }
@@ -2556,6 +2714,7 @@ function loadNamedProject() {
   if (project.motorDesignInputs) restoreMotorDesignInputs(project.motorDesignInputs);
   else calculateMotorFeeder();
   restoreCommissioningChecks(project.commissioning || getDefaultCommissioningSnapshot());
+  restoreStandardsReview(project.standardsReview || getDefaultStandardsReviewSnapshot());
   if (project.plc) restorePlcSnapshot(project.plc);
   showToast(`Project loaded: ${project.name}`);
 }
@@ -2766,6 +2925,10 @@ function buildEngineeringReport() {
       schedule: scheduleResult.valid ? scheduleResult : null,
       motorDesign: lastMotorDesign ? { inputs: lastMotorDesign.inputs, estimate: lastMotorDesign } : null,
       commissioning: getCommissioningSnapshot(),
+      standardsReview: {
+        ...getStandardsReviewSnapshot(),
+        recordStatus: standardsReviewRecordStatus(getStandardsReviewSnapshot())
+      },
       commissioningSummary: {
         total: commissioningChecks.length,
         recorded: getCommissioningSnapshot().filter(item => item.status === 'recorded').length,
@@ -3022,6 +3185,23 @@ function exportEngineeringReportPdf() {
       item.label || item.name || item.id || 'Check',
       `${item.status || 'not-recorded'}${item.evidence ? ` | ${item.evidence}` : ''}`
     ]));
+    addEngineeringPdfTable(doc, 'Standards basis and external review record', [
+      ['Record status', project.standardsReview.recordStatus],
+      ['Jurisdiction / authority', project.standardsReview.jurisdiction || 'Not recorded'],
+      ['Standard / code', project.standardsReview.standard || 'Not recorded'],
+      ['Edition / year', project.standardsReview.edition || 'Not recorded'],
+      ['Amendments', project.standardsReview.amendments || 'Not recorded'],
+      ['Reviewer', project.standardsReview.reviewerName || 'Not recorded'],
+      ['Qualification / registration', project.standardsReview.reviewerQualification || 'Not recorded'],
+      ['Organization', project.standardsReview.reviewerOrganization || 'Not recorded'],
+      ['Review date', project.standardsReview.reviewDate || 'Not recorded'],
+      ['Reviewer self-declaration', project.standardsReview.reviewerDeclaration ? 'Provided; not verified by the app' : 'Not provided'],
+      ['Sources / evidence references', project.standardsReview.sourceReferences || 'Not recorded'],
+      ...project.standardsReview.checks.map(item => {
+        const check = standardsReviewChecks.find(entry => entry.id === item.id);
+        return [check?.title || item.id, `${item.status}${item.note ? ` | ${item.note}` : ''}`];
+      })
+    ]);
     addEngineeringPdfTable(doc, 'Learner progress', reportRows(report.learning.progress));
     addEngineeringPdfTable(doc, 'Review history', (project.review || []).map(item => [
       `${item.action} | ${item.actor || 'Unknown'}`,
@@ -4502,6 +4682,7 @@ function initialise() {
   renderPlcWorkspace();
   insertLoadScheduleModule();
   renderCommissioningChecks(getSavedCommissioningDraft());
+  renderStandardsReview(getSavedStandardsReviewDraft());
   const capacityWarning = document.createElement('small');
   capacityWarning.id = 'res-capacity-warning';
   capacityWarning.setAttribute('role', 'status');
@@ -4557,6 +4738,8 @@ function initialise() {
   });
   $('#commissioning-checks').addEventListener('input', persistCommissioningDraft);
   $('#commissioning-checks').addEventListener('change', persistCommissioningDraft);
+  $('#standards-review-panel')?.addEventListener('input', persistStandardsReviewDraft);
+  $('#standards-review-panel')?.addEventListener('change', persistStandardsReviewDraft);
   $('#calculate-schedule').addEventListener('click', calculateSchedule); $('#schedule-phase').addEventListener('change', calculateSchedule); $('#schedule-method').addEventListener('change', calculateSchedule); $('#schedule-rcd').addEventListener('change', calculateSchedule); $('#add-load-row').addEventListener('click', () => { addScheduleRow(); calculateSchedule(); }); $('#schedule-body').addEventListener('input', calculateSchedule); $('#schedule-body').addEventListener('click', event => { if (event.target.closest('.delete-schedule-row')) { event.target.closest('tr').remove(); calculateSchedule(); } });
   $('#troubleshooting-results').addEventListener('click', answerTroubleshooting);
   $('#station-diagnostic-results').addEventListener('click', answerStationDiagnostic);
