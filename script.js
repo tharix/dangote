@@ -407,9 +407,15 @@ const standardsReviewCrosswalk = [
   },
   {
     topic: 'Document status and applicable editions',
-    model: 'The supplied NESIS document is a 2015 publication; its normative references list BS 7671:2008 and several NIS IEC documents.',
-    references: 'NESIS 2015 sections 1.2-1.3 (PDF pp. 12-15); current NEMSA regulations page: https://web.nemsa.gov.ng/regulations.',
-    review: 'Confirm current legal status, amendments, referenced national adoptions, and replacement editions with the relevant Nigerian authority before using any clause as a current design basis.'
+    model: 'The supplied NESIS document is a 2015 publication; its normative references list BS 7671:2008 and several NIS IEC documents. The public-source check did not establish whether NESIS remains current or which listed standards editions apply today.',
+    references: 'NESIS 2015 sections 1.2-1.3 (PDF pp. 12-15); NEMSA regulations: https://web.nemsa.gov.ng/regulations; NEMSA roles: https://nemsa.gov.ng/our-roles/; SON standards library: https://son.gov.ng/library-services/; IET BS 7671: https://electrical.theiet.org/bs-7671-18th-edition-wiring-regulations/; BSI catalogue: https://knowledge.bsigroup.com/products/requirements-for-electrical-installations-i-et-wiring-regulations.',
+    review: 'The published regulator/library pages reviewed did not settle current NESIS legal status, amendments, NIS IEC editions, BS 7671 edition, or NCP 09 edition. Obtain confirmation from NEMSA/SON and the current controlled standards before using any clause as a design basis.'
+  },
+  {
+    topic: 'Reviewer authorization and installation certification',
+    model: 'Reviewer identity, degree, registration details, and declaration are self-entered. The application cannot validate a person, license, competency, or authority to certify an installation.',
+    references: 'NEMSA roles: https://nemsa.gov.ng/our-roles/; NEMSA installation contractor/personnel certification is referenced on its official site.',
+    review: 'The public material reviewed identifies NEMSA as the inspection, testing, and installation-certification authority, but does not establish a complete individual credential/authorization route. Confirm the reviewer’s applicable NEMSA authorization and scope directly with NEMSA; a degree alone is not represented as certification authority.'
   },
   {
     topic: 'ECOWAS source supplied',

@@ -568,9 +568,10 @@
           !defaults.standard.includes('proposed basis') ||
           !defaults.sourceReferences.includes('nemsa.gov.ng/wp-content/uploads/2019/11/NESIS-Regulations-2015-1-1.pdf') ||
           defaults.reviewerName !== '' || defaults.reviewerDeclaration ||
-          crosswalk.length < 7 ||
+          crosswalk.length < 8 ||
           !crosswalk.find(item => item.topic === 'Load, current, and schedule demand')?.review.includes('diversity') ||
-          !crosswalk.find(item => item.topic === 'ECOWAS source supplied')?.model.includes('not a wiring-installation code')) return false;
+          !crosswalk.find(item => item.topic === 'ECOWAS source supplied')?.model.includes('not a wiring-installation code') ||
+          !crosswalk.find(item => item.topic === 'Reviewer authorization and installation certification')?.review.includes('a degree alone')) return false;
         app.document.querySelector('#standards-jurisdiction').value = 'Test jurisdiction';
         app.document.querySelector('#standards-name').value = 'Example standard for test only';
         app.document.querySelector('#standards-edition').value = '2026';
