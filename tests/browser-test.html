@@ -561,7 +561,12 @@
         const app = testApp();
         const defaults = app.getDefaultStandardsReviewSnapshot();
         if (!app.isValidStandardsReviewSnapshot(defaults) ||
-          app.standardsReviewRecordStatus(defaults) !== 'Record incomplete') return false;
+          app.standardsReviewRecordStatus(defaults) !== 'Record incomplete' ||
+          defaults.jurisdiction !== 'Nigeria' ||
+          defaults.edition !== '2015' ||
+          !defaults.standard.includes('proposed basis') ||
+          !defaults.sourceReferences.includes('nemsa.gov.ng/wp-content/uploads/2019/11/NESIS-Regulations-2015-1-1.pdf') ||
+          defaults.reviewerName !== '' || defaults.reviewerDeclaration) return false;
         app.document.querySelector('#standards-jurisdiction').value = 'Test jurisdiction';
         app.document.querySelector('#standards-name').value = 'Example standard for test only';
         app.document.querySelector('#standards-edition').value = '2026';

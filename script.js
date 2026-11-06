@@ -2038,15 +2038,22 @@ function getSavedCommissioningDraft() {
 
 function getDefaultStandardsReviewSnapshot() {
   return {
-    jurisdiction: '',
-    standard: '',
-    edition: '',
+    jurisdiction: 'Nigeria',
+    standard: 'NESIS Regulations (proposed basis; applicability to be confirmed)',
+    edition: '2015',
     amendments: '',
     reviewerName: '',
     reviewerQualification: '',
     reviewerOrganization: '',
     reviewDate: '',
-    sourceReferences: '',
+    sourceReferences: [
+      'NEMSA NESIS Regulations 2015: https://nemsa.gov.ng/wp-content/uploads/2019/11/NESIS-Regulations-2015-1-1.pdf',
+      'NEMSA standards, policies and guidelines: https://web.nemsa.gov.ng/regulations',
+      'IEC: https://www.iec.ch',
+      'ECOWAS document supplied for review: https://eis.ecowas.int/assets/front/medias/doc/media_20231011104957.pdf',
+      'Standards Organisation of Nigeria: https://son.gov.ng/',
+      'ECREEE: https://www.ecreee.org/'
+    ].join('\n'),
     reviewerDeclaration: false,
     checks: standardsReviewChecks.map(check => ({ id: check.id, status: 'not-reviewed', note: '' }))
   };
