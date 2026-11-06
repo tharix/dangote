@@ -365,9 +365,26 @@ const guidedLessons = [
 ];
 const profileStorageKey = 'dangote-academy-profile';
 const profileDirectoryKey = 'dangote-academy-profiles';
+const cloudSessionStorageKey = 'dangote-academy-cloud-session';
 const troubleshootingStorageKey = 'dangote-academy-troubleshooting';
 const stationDiagnosticsStorageKey = 'dangote-academy-station-diagnostics';
 const electronicsDiagnosticsStorageKey = 'dangote-academy-electronics-diagnostics';
+let cloudContext = null;
+const workspaceBackupStorageKeys = [
+  'dangote-academy-profile',
+  'dangote-academy-profiles',
+  'dangote-academy-projects',
+  'dangote-academy-boq',
+  'dangote-academy-circuit',
+  'dangote-academy-installation',
+  'dangote-academy-lessons',
+  'dangote-academy-troubleshooting',
+  'dangote-academy-station-diagnostics',
+  'dangote-academy-electronics-diagnostics',
+  'dangote-academy-plc',
+  'dangote-academy-plc-challenges',
+  'dangote-academy-plc-troubleshooting'
+];
 
 const $ = (selector, parent = document) => parent.querySelector(selector);
 const $$ = (selector, parent = document) => [...parent.querySelectorAll(selector)];
@@ -385,7 +402,12 @@ function showToast(message) {
 
 function switchModule(moduleId) {
   if (moduleId !== 'plc-lab') stopPlcScans();
-  $$('.nav-item').forEach(item => item.classList.toggle('active', item.dataset.module === moduleId));
+  $$('.nav-item').forEach(item => {
+    const active = item.dataset.module === moduleId;
+    item.classList.toggle('active', active);
+    if (active) item.setAttribute('aria-current', 'page');
+    else item.removeAttribute('aria-current');
+  });
   $$('.module').forEach(module => module.classList.toggle('active', module.id === `module-${moduleId}`));
   $('#module-title').textContent = moduleTitles[moduleId] || moduleTitles.dashboard;
   $('#sidebar').classList.remove('open');
@@ -550,6 +572,612 @@ function renderVirtualInstruments() {
   $('#scope-mode').textContent = acSignal ? 'AC · 50 Hz model' : dcSignal ? 'DC · steady model' : 'No energized signal';
   $('#scope-signal').textContent = acSignal ? '230 V AC model' : dcSignal ? `${sourceVoltage} V DC model` : 'No signal';
   $('#scope-vpp').textContent = acSignal ? `${(sourceVoltage * Math.sqrt(2)).toFixed(0)} V (modeled)` : dcSignal ? '0 V ripple (idealized)' : '0 V';
+}
+
+function getCloudConfiguration() {
+  const config = window.DANGOTE_SUPABASE_CONFIG;
+  if (!config || typeof config.url !== 'string' || typeof config.anonKey !== 'string' ||
+    !config.url.trim() || !config.anonKey.trim()) return null;
+  const endpoint = new URL(config.url);
+  if (endpoint.protocol !== 'https:' || !endpoint.hostname.endsWith('.supabase.co') ||
+    endpoint.pathname !== '/' || endpoint.search || endpoint.hash) {
+    throw new Error('Supabase URL must be an HTTPS Supabase project URL.');
+  }
+  return { url: endpoint.origin, anonKey: config.anonKey.trim() };
+}
+
+function getCloudSession() {
+  try {
+    const session = JSON.parse(sessionStorage.getItem(cloudSessionStorageKey) || 'null');
+    if (session?.accessToken && session?.refreshToken && session?.user?.id) return session;
+    return null;
+  } catch (error) {
+    console.error('Cloud sign-in session could not be read.', error);
+    sessionStorage.removeItem(cloudSessionStorageKey);
+    return null;
+  }
+}
+
+function saveCloudSession(session, requiresPasswordUpdate = false) {
+  const safeSession = {
+    accessToken: session.access_token,
+    refreshToken: session.refresh_token,
+    expiresAt: Number(session.expires_at) || Math.floor(Date.now() / 1000) + Number(session.expires_in || 3600),
+    user: { id: session.user.id, email: session.user.email || '' },
+    requiresPasswordUpdate
+  };
+  if (!safeSession.accessToken || !safeSession.refreshToken || !safeSession.user.id) {
+    throw new Error('The sign-in response did not contain a valid session.');
+  }
+  sessionStorage.setItem(cloudSessionStorageKey, JSON.stringify(safeSession));
+  return safeSession;
+}
+
+async function sendCloudRequest(path, { method = 'GET', body, token, prefer } = {}) {
+  const config = getCloudConfiguration();
+  if (!config) throw new Error('Cloud accounts are not configured.');
+  const headers = { apikey: config.anonKey, Accept: 'application/json' };
+  if (token) headers.Authorization = `Bearer ${token}`;
+  if (body !== undefined) headers['Content-Type'] = 'application/json';
+  if (prefer) headers.Prefer = prefer;
+  const response = await fetch(`${config.url}${path}`, {
+    method,
+    headers,
+    ...(body === undefined ? {} : { body: JSON.stringify(body) })
+  });
+  const text = await response.text();
+  let result = null;
+  if (text) {
+    try {
+      result = JSON.parse(text);
+    } catch (error) {
+      console.error('Cloud service returned malformed JSON.', error);
+      throw new Error('Cloud service returned an unreadable response.');
+    }
+  }
+  if (!response.ok) {
+    const message = result?.msg || result?.message || result?.hint || result?.error_description;
+    const requestError = new Error(message || `Cloud request failed (${response.status}).`);
+    requestError.status = response.status;
+    throw requestError;
+  }
+  return result;
+}
+
+async function refreshCloudSession(session) {
+  const result = await sendCloudRequest('/auth/v1/token?grant_type=refresh_token', {
+    method: 'POST',
+    body: { refresh_token: session.refreshToken }
+  });
+  return saveCloudSession(result, session.requiresPasswordUpdate === true);
+}
+
+function clearCloudAuthCallback() {
+  const url = new URL(window.location.href);
+  ['token_hash', 'type', 'error', 'error_code', 'error_description'].forEach(key => url.searchParams.delete(key));
+  url.hash = '';
+  const cleanUrl = `${url.pathname}${url.search}`;
+  window.history.replaceState(null, document.title, cleanUrl);
+}
+
+async function processCloudAuthCallback() {
+  const fragment = new URLSearchParams(window.location.hash.slice(1));
+  const fragmentType = fragment.get('type');
+  if (fragment.get('access_token') && fragment.get('refresh_token') &&
+    ['invite', 'recovery', 'signup'].includes(fragmentType)) {
+    const accessToken = fragment.get('access_token');
+    const user = await sendCloudRequest('/auth/v1/user', { token: accessToken });
+    const session = saveCloudSession({
+      access_token: accessToken,
+      refresh_token: fragment.get('refresh_token'),
+      expires_at: Number(fragment.get('expires_at')) || undefined,
+      expires_in: Number(fragment.get('expires_in')) || 3600,
+      user
+    }, true);
+    clearCloudAuthCallback();
+    return session;
+  }
+  const query = new URLSearchParams(window.location.search);
+  const tokenHash = query.get('token_hash');
+  const queryType = query.get('type');
+  if (tokenHash && ['invite', 'recovery', 'signup'].includes(queryType)) {
+    const session = await sendCloudRequest('/auth/v1/verify', {
+      method: 'POST',
+      body: { token_hash: tokenHash, type: queryType }
+    });
+    const saved = saveCloudSession(session, true);
+    clearCloudAuthCallback();
+    return saved;
+  }
+  return null;
+}
+
+async function cloudRequest(path, options = {}) {
+  let session = getCloudSession();
+  if (!session) throw new Error('Sign in to use the cloud workspace.');
+  if (session.expiresAt <= Math.floor(Date.now() / 1000) + 60) {
+    session = await refreshCloudSession(session);
+  }
+  try {
+    return await sendCloudRequest(path, { ...options, token: session.accessToken });
+  } catch (error) {
+    if (error.status !== 401) throw error;
+    session = await refreshCloudSession(session);
+    return sendCloudRequest(path, { ...options, token: session.accessToken });
+  }
+}
+
+function setCloudStatus(message, state) {
+  $('#cloud-status').textContent = message;
+  $('#cloud-state').textContent = state;
+}
+
+function getApiCollectionPath(table, filters = {}) {
+  const query = new URLSearchParams({ select: '*', ...filters });
+  return `/rest/v1/${table}?${query.toString()}`;
+}
+
+async function renderCloudWorkspace() {
+  const signInForm = $('#cloud-signin-form');
+  const account = $('#cloud-account');
+  if (!signInForm || !account) return;
+  let config;
+  try {
+    config = getCloudConfiguration();
+  } catch (error) {
+    setCloudStatus(error.message, 'Configuration error');
+    signInForm.hidden = true;
+    account.hidden = true;
+    return;
+  }
+  if (!config) {
+    $('#cloud-submit-cohort-wrap').hidden = true;
+    setCloudStatus('Cloud accounts are unavailable until a Supabase URL and public anon key are configured. Offline features continue to work.', 'Not configured');
+    signInForm.hidden = true;
+    account.hidden = true;
+    return;
+  }
+
+  let session;
+  try {
+    session = await processCloudAuthCallback() || getCloudSession();
+  } catch (error) {
+    console.error('Cloud account callback could not be verified.', error);
+    signInForm.hidden = false;
+    account.hidden = true;
+    setCloudStatus(`Account link could not be verified: ${error.message}`, 'Verification failed');
+    return;
+  }
+  if (!session) {
+    cloudContext = null;
+    $('#cloud-submit-cohort-wrap').hidden = true;
+    $('#cloud-cohorts').replaceChildren();
+    signInForm.hidden = false;
+    account.hidden = true;
+    setCloudStatus('Sign in with an account invited by your academy administrator. Cloud permissions are enforced by Supabase policies.', 'Signed out');
+    return;
+  }
+
+  signInForm.hidden = true;
+  account.hidden = false;
+  cloudContext = null;
+  $('#cloud-submit-cohort-wrap').hidden = true;
+  $('#cloud-cohorts').replaceChildren();
+  setCloudStatus('Loading account and class information...', 'Connecting');
+  try {
+    const profilePath = getApiCollectionPath('profiles', { user_id: `eq.${session.user.id}` });
+    const profiles = await cloudRequest(profilePath);
+    const profile = profiles?.[0];
+    if (!profile || !['student', 'instructor', 'administrator'].includes(profile.role)) {
+      throw new Error('Your account does not have an academy profile. Ask an administrator to provision it.');
+    }
+    const membershipPath = getApiCollectionPath('cohort_members', {
+      user_id: `eq.${session.user.id}`,
+      select: 'cohort_id,member_role,cohort:cohorts(id,name)'
+    });
+    const memberships = await cloudRequest(membershipPath);
+    const cohorts = [];
+    for (const membership of memberships || []) {
+      const cohort = Array.isArray(membership.cohort) ? membership.cohort[0] : membership.cohort;
+      if (!cohort) continue;
+      const projectPath = getApiCollectionPath('projects', {
+        cohort_id: `eq.${cohort.id}`,
+        order: 'updated_at.desc'
+      });
+      const projects = await cloudRequest(projectPath);
+      let members = [];
+      let inviteCode = '';
+      if (membership.member_role === 'instructor' || profile.role === 'administrator') {
+        const memberPath = getApiCollectionPath('cohort_members', {
+          cohort_id: `eq.${cohort.id}`,
+          select: 'user_id,member_role,profile:profiles(display_name)'
+        });
+        members = await cloudRequest(memberPath);
+        const invitePath = getApiCollectionPath('cohort_invites', {
+          cohort_id: `eq.${cohort.id}`,
+          select: 'invite_code'
+        });
+        inviteCode = (await cloudRequest(invitePath))?.[0]?.invite_code || '';
+      }
+      cohorts.push({ ...cohort, memberRole: membership.member_role, projects: projects || [], members, inviteCode });
+    }
+    cloudContext = { profile, cohorts };
+    $('#cloud-account-name').textContent = `${profile.display_name || session.user.email} (${profile.role})`;
+    $('#cloud-display-name').value = profile.display_name || '';
+    const needsPassword = session.requiresPasswordUpdate === true;
+    $('#cloud-profile-form').hidden = needsPassword;
+    $('#cloud-set-password-form').hidden = !needsPassword;
+    if (needsPassword) $('#cloud-submit-cohort-wrap').hidden = true;
+    $('#cloud-create-cohort-form').hidden = needsPassword || !['instructor', 'administrator'].includes(profile.role);
+    $('#cloud-join-cohort-form').hidden = needsPassword || profile.role !== 'student';
+    if (needsPassword) {
+      setCloudStatus('Choose a new password to complete the account invitation or recovery.', 'Password update required');
+      $('#cloud-cohorts').replaceChildren();
+      return;
+    }
+    renderCloudCohorts();
+    setCloudStatus('Cloud workspace connected. Account permissions and project access are checked by the server.', 'Connected');
+  } catch (error) {
+    console.error('Cloud workspace could not be loaded.', error);
+    if ([400, 401].includes(error.status)) {
+      sessionStorage.removeItem(cloudSessionStorageKey);
+      cloudContext = null;
+      signInForm.hidden = false;
+      account.hidden = true;
+      setCloudStatus('Cloud session expired or is no longer valid. Sign in again.', 'Signed out');
+      return;
+    }
+    setCloudStatus(`Cloud workspace could not be loaded: ${error.message}`, 'Connection error');
+  }
+}
+
+function renderCloudCohorts() {
+  const target = $('#cloud-cohorts');
+  if (!target || !cloudContext) return;
+  const cohortSelect = $('#cloud-submit-cohort');
+  const previousCohort = cohortSelect.value;
+  const studentCohorts = cloudContext.cohorts.filter(cohort => cohort.memberRole === 'student');
+  cohortSelect.innerHTML = '<option value="">Choose a class</option>';
+  studentCohorts.forEach(cohort => {
+    const option = document.createElement('option');
+    option.value = cohort.id;
+    option.textContent = cohort.name;
+    cohortSelect.appendChild(option);
+  });
+  cohortSelect.value = studentCohorts.some(cohort => cohort.id === previousCohort)
+    ? previousCohort
+    : studentCohorts.length === 1 ? studentCohorts[0].id : '';
+  $('#cloud-submit-cohort-wrap').hidden = cloudContext.profile.role !== 'student' || !studentCohorts.length;
+  target.innerHTML = cloudContext.cohorts.length ? cloudContext.cohorts.map(cohort => {
+    const staff = cohort.memberRole === 'instructor' || cloudContext.profile.role === 'administrator';
+    const membersById = new Map((cohort.members || []).map(member => {
+      const profile = Array.isArray(member.profile) ? member.profile[0] : member.profile;
+      return [member.user_id, profile?.display_name || 'Learner'];
+    }));
+    const pending = cohort.projects.filter(project => project.status === 'submitted').length;
+    const projectRows = cohort.projects.length ? cohort.projects.map(project => {
+      const actions = staff && project.status === 'submitted'
+        ? `<textarea maxlength="500" aria-label="Review comment for ${escapeHtml(project.name)}" data-cloud-comment="${escapeHtml(project.id)}" placeholder="Optional feedback"></textarea><button class="secondary-button cloud-review-action" data-cloud-project="${escapeHtml(project.id)}" data-cloud-status="approved">Approve</button><button class="secondary-button cloud-review-action" data-cloud-project="${escapeHtml(project.id)}" data-cloud-status="changes-requested">Request changes</button>`
+        : '';
+      const ownerAction = project.owner_id === getCloudSession()?.user.id
+        ? `<button class="secondary-button cloud-project-load" data-cloud-project="${escapeHtml(project.id)}">Load to this device</button>`
+        : '';
+      const progress = project.workspace?.learningProgress;
+      const progressText = progress
+        ? `<small>${Number(progress.lessonsCompleted) || 0}/${Number(progress.lessonsTotal) || 0} lessons | ${Number(progress.scenariosCompleted) || 0}/${Number(progress.scenariosTotal) || 0} building cases</small>`
+        : '';
+      const feedback = project.review_comment
+        ? `<small>Instructor feedback: ${escapeHtml(project.review_comment)}</small>`
+        : '';
+      const evidence = staff
+        ? `<details class="cloud-project-evidence"><summary>Project evidence</summary><pre>${escapeHtml(JSON.stringify({ boq: project.rows, workspace: project.workspace }, null, 2))}</pre></details>`
+        : '';
+      return `<div class="cloud-project-row"><span>${escapeHtml(membersById.get(project.owner_id) || (project.owner_id === getCloudSession()?.user.id ? cloudContext.profile.display_name || 'You' : 'Learner'))} - ${escapeHtml(project.name)}${progressText}${feedback}</span><span class="status ${project.status === 'approved' ? 'success' : project.status === 'changes-requested' ? 'danger' : 'info'}">${escapeHtml(project.status)}</span>${actions}${ownerAction}${evidence}</div>`;
+    }).join('') : '<p class="muted">No cloud projects in this cohort yet.</p>';
+    return `<article class="cloud-cohort-card"><div><h4>${escapeHtml(cohort.name)}</h4><p class="muted">${staff ? `${cohort.members.length} members | ${pending} awaiting review` : `${cohort.projects.length} of your projects`}</p>${staff && cohort.inviteCode ? `<p>Student invite code: <code>${escapeHtml(cohort.inviteCode)}</code></p>` : ''}</div>${projectRows}</article>`;
+  }).join('') : '<p class="muted">No cohorts yet. Join with an invite code or create a cohort if your account has instructor permissions.</p>';
+}
+
+async function signInToCloud(event) {
+  event.preventDefault();
+  const email = $('#cloud-email').value.trim();
+  const password = $('#cloud-password').value;
+  try {
+    const result = await sendCloudRequest('/auth/v1/token?grant_type=password', {
+      method: 'POST',
+      body: { email, password }
+    });
+    saveCloudSession(result);
+    $('#cloud-password').value = '';
+    await renderCloudWorkspace();
+  } catch (error) {
+    console.error('Cloud sign-in failed.', error);
+    setCloudStatus(`Sign-in failed: ${error.message}`, 'Sign-in failed');
+  }
+}
+
+async function setCloudPassword(event) {
+  event.preventDefault();
+  const password = $('#cloud-new-password').value;
+  if (password !== $('#cloud-confirm-password').value) {
+    setCloudStatus('The password fields do not match.', 'Check password');
+    return;
+  }
+  if (password.length < 12) {
+    setCloudStatus('Use a password with at least 12 characters.', 'Check password');
+    return;
+  }
+  const session = getCloudSession();
+  if (!session) {
+    setCloudStatus('The account link has expired. Request a new invite or recovery link.', 'Link expired');
+    return;
+  }
+  try {
+    await cloudRequest('/auth/v1/user', {
+      method: 'PUT',
+      body: { password }
+    });
+    const refreshedSession = getCloudSession();
+    if (!refreshedSession) throw new Error('The account session ended before the password update completed.');
+    refreshedSession.requiresPasswordUpdate = false;
+    sessionStorage.setItem(cloudSessionStorageKey, JSON.stringify(refreshedSession));
+    $('#cloud-set-password-form').reset();
+    await renderCloudWorkspace();
+    showToast('Account password updated.');
+  } catch (error) {
+    console.error('Cloud account password update failed.', error);
+    setCloudStatus(`Password could not be updated: ${error.message}`, 'Update failed');
+  }
+}
+
+async function signOutOfCloud() {
+  let revokeError = null;
+  if (getCloudSession()) {
+    try {
+      await cloudRequest('/auth/v1/logout', { method: 'POST' });
+    } catch (error) {
+      revokeError = error;
+      console.error('Remote cloud sign-out failed.', error);
+    }
+  }
+  sessionStorage.removeItem(cloudSessionStorageKey);
+  cloudContext = null;
+  $('#cloud-cohorts').replaceChildren();
+  renderCloudWorkspace();
+  if (revokeError) showToast(`Signed out on this device. Remote session revocation failed: ${revokeError.message}`);
+  else showToast('Signed out of the cloud workspace.');
+}
+
+async function createCloudCohort(event) {
+  event.preventDefault();
+  const name = $('#cloud-new-cohort-name').value.trim();
+  if (!name) return;
+  try {
+    await cloudRequest('/rest/v1/rpc/create_academy_cohort', { method: 'POST', body: { cohort_name: name } });
+    $('#cloud-new-cohort-name').value = '';
+    await renderCloudWorkspace();
+    showToast('Cohort created. Share its invite code with enrolled students.');
+  } catch (error) {
+    console.error('Cohort creation failed.', error);
+    setCloudStatus(`Cohort could not be created: ${error.message}`, 'Request failed');
+  }
+}
+
+async function updateCloudProfile(event) {
+  event.preventDefault();
+  const displayName = $('#cloud-display-name').value.trim();
+  if (!displayName || displayName.length > 80) {
+    setCloudStatus('Enter a display name between 1 and 80 characters.', 'Invalid name');
+    return;
+  }
+  try {
+    const userId = getCloudSession()?.user.id;
+    if (!userId) throw new Error('Sign in before updating your class name.');
+    const params = new URLSearchParams({ user_id: `eq.${userId}` });
+    await cloudRequest(`/rest/v1/profiles?${params}`, {
+      method: 'PATCH',
+      body: { display_name: displayName },
+      prefer: 'return=minimal'
+    });
+    await renderCloudWorkspace();
+    showToast('Class display name updated.');
+  } catch (error) {
+    console.error('Cloud profile update failed.', error);
+    setCloudStatus(`Display name could not be updated: ${error.message}`, 'Update failed');
+  }
+}
+
+async function joinCloudCohort(event) {
+  event.preventDefault();
+  const code = $('#cloud-invite-code').value.trim();
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(code)) {
+    setCloudStatus('Enter the complete cohort invite code.', 'Invalid invite');
+    return;
+  }
+  try {
+    await cloudRequest('/rest/v1/rpc/join_academy_cohort', { method: 'POST', body: { invite_code: code } });
+    $('#cloud-invite-code').value = '';
+    await renderCloudWorkspace();
+    showToast('Joined the cohort.');
+  } catch (error) {
+    console.error('Joining the cohort failed.', error);
+    setCloudStatus(`Could not join the cohort: ${error.message}`, 'Request failed');
+  }
+}
+
+async function reviewCloudProject(event) {
+  const loadButton = event.target.closest('.cloud-project-load');
+  if (loadButton) {
+    loadCloudProjectToDevice(loadButton.dataset.cloudProject);
+    return;
+  }
+  const button = event.target.closest('.cloud-review-action');
+  if (!button || !cloudContext || !['approved', 'changes-requested'].includes(button.dataset.cloudStatus)) return;
+  button.disabled = true;
+  try {
+    const comment = $$('[data-cloud-comment]', $('#cloud-cohorts'))
+      .find(input => input.dataset.cloudComment === button.dataset.cloudProject)?.value.trim() || '';
+    const params = new URLSearchParams({ id: `eq.${button.dataset.cloudProject}` });
+    await cloudRequest(`/rest/v1/projects?${params}`, {
+      method: 'PATCH',
+      body: { status: button.dataset.cloudStatus, review_comment: comment },
+      prefer: 'return=minimal'
+    });
+    await renderCloudWorkspace();
+    showToast(`Cloud project marked ${button.dataset.cloudStatus}.`);
+  } catch (error) {
+    console.error('Cloud project review failed.', error);
+    setCloudStatus(`Review could not be saved: ${error.message}`, 'Review failed');
+    button.disabled = false;
+  }
+}
+
+function loadCloudProjectToDevice(projectId) {
+  if (!cloudContext || typeof projectId !== 'string') return false;
+  const session = getCloudSession();
+  const remote = cloudContext.cohorts
+    .flatMap(cohort => cohort.projects)
+    .find(project => project.id === projectId && project.owner_id === session?.user.id);
+  if (!remote || !remote.workspace || !Array.isArray(remote.rows)) {
+    showToast('This cloud project is unavailable or is not owned by your account.');
+    return false;
+  }
+  const existing = getSavedProjects().find(project => project.name === remote.name);
+  if (existing && !window.confirm('Replace the local project with this cloud copy? The existing local version will be kept as a revision.')) return false;
+  const revisions = [...(Array.isArray(existing?.revisions) ? existing.revisions : [])];
+  if (existing) {
+    revisions.push({
+      revisionId: `r-${Date.now()}`,
+      savedAt: existing.savedAt || new Date().toISOString(),
+      rows: existing.rows,
+      circuit: existing.circuit,
+      plc: existing.plc || null,
+      schedule: existing.schedule || null,
+      calculationInputs: existing.calculationInputs || null,
+      motorDesignInputs: existing.motorDesignInputs || null,
+      calculation: existing.calculation || null,
+      motorDesign: existing.motorDesign || null,
+      commissioning: existing.commissioning || getDefaultCommissioningSnapshot(),
+      status: existing.status || 'draft'
+    });
+  }
+  const sessionProfile = cloudContext.profile;
+  const restored = {
+    name: remote.name,
+    savedAt: remote.updated_at || new Date().toISOString(),
+    rows: remote.rows,
+    circuit: remote.workspace.circuit,
+    plc: remote.workspace.plc || null,
+    schedule: remote.workspace.schedule || null,
+    calculationInputs: remote.workspace.calculationInputs || null,
+    motorDesignInputs: remote.workspace.motorDesignInputs || null,
+    commissioning: remote.workspace.commissioning || getDefaultCommissioningSnapshot(),
+    owner: { name: sessionProfile.display_name || getCloudSession()?.user.email || 'Learner', role: sessionProfile.role },
+    cloudUserId: remote.owner_id,
+    cloudCohortId: remote.cohort_id,
+    status: normalizeProjectStatus(remote.status),
+    comments: remote.review_comment || '',
+    reviewHistory: Array.isArray(remote.review_history) ? remote.review_history.map(item => ({
+      action: item.action || 'Reviewed',
+      actor: item.actor_id === session?.user.id ? sessionProfile.display_name || 'You' : 'Instructor',
+      at: item.at || remote.updated_at,
+      comment: item.comment || ''
+    })) : [],
+    revisions: revisions.slice(-10),
+    resubmissionCount: Array.isArray(remote.review_history)
+      ? remote.review_history.filter(item => item.action === 'Resubmitted').length
+      : existing?.resubmissionCount || 0
+  };
+  try {
+    validateProjectWorkspace(restored);
+    const projects = getSavedProjects().filter(project => project.name !== restored.name);
+    projects.push(restored);
+    localStorage.setItem('dangote-academy-projects', JSON.stringify(projects));
+    projectsChangedDuringStartup = true;
+    persistProjects(projects);
+    refreshProjectList();
+    $('#project-list').value = restored.name;
+    renderRevisionControls(restored.name);
+    loadNamedProject();
+    renderReview();
+    showToast(`Cloud project loaded on this device: ${restored.name}`);
+    return true;
+  } catch (error) {
+    console.error('Cloud project could not be restored to this device.', error);
+    showToast('Cloud project is invalid and was not loaded.');
+    return false;
+  }
+}
+
+async function syncSubmittedProjectToCloud(project) {
+  try {
+    if (!getCloudConfiguration()) return;
+    const session = getCloudSession();
+    if (!session) {
+      showToast('Project submitted on this device. Sign in to send it to a class.');
+      return;
+    }
+    if (!cloudContext) await renderCloudWorkspace();
+    const membership = cloudContext?.cohorts.find(cohort =>
+      cohort.memberRole === 'student' && cohort.id === $('#cloud-submit-cohort').value
+    );
+    if (!membership) {
+      showToast('Project is saved locally. Join a class in Profile before sending it to the cloud.');
+      return;
+    }
+    const params = new URLSearchParams({
+      owner_id: `eq.${session.user.id}`,
+      cohort_id: `eq.${membership.id}`,
+      name: `eq.${project.name}`,
+      select: 'id,status'
+    });
+    const matches = await cloudRequest(`/rest/v1/projects?${params}`);
+    const workspace = {
+      circuit: project.circuit,
+      plc: project.plc,
+      schedule: project.schedule,
+      calculationInputs: project.calculationInputs,
+      motorDesignInputs: project.motorDesignInputs,
+      commissioning: project.commissioning,
+      learningProgress: getStudentProgressSummary()
+    };
+    let remoteProject = matches?.[0];
+    if (!remoteProject) {
+      const created = await cloudRequest('/rest/v1/projects', {
+        method: 'POST',
+        body: {
+          owner_id: session.user.id,
+          cohort_id: membership.id,
+          name: project.name,
+          rows: project.rows,
+          workspace,
+          status: 'draft'
+        },
+        prefer: 'return=representation'
+      });
+      remoteProject = created?.[0];
+    } else {
+      if (remoteProject.status === 'approved') {
+        throw new Error('This cloud project was approved. Save a new project name to submit a separate design.');
+      }
+      await cloudRequest(`/rest/v1/projects?id=eq.${encodeURIComponent(remoteProject.id)}`, {
+        method: 'PATCH',
+        body: { rows: project.rows, workspace, status: 'draft' },
+        prefer: 'return=minimal'
+      });
+    }
+    if (!remoteProject?.id) throw new Error('Cloud project was saved without a project identifier.');
+    await cloudRequest(`/rest/v1/projects?id=eq.${encodeURIComponent(remoteProject.id)}`, {
+      method: 'PATCH',
+      body: { status: 'submitted' },
+      prefer: 'return=minimal'
+    });
+    await renderCloudWorkspace();
+    showToast('Project submitted to the cloud class dashboard.');
+  } catch (error) {
+    console.error('Cloud project submission failed.', error);
+    showToast(`Project remains submitted on this device; cloud sync failed: ${error.message}`);
+  }
 }
 
 function getProfile() {
@@ -961,6 +1589,7 @@ function submitNamedProject() {
   renderReview();
   renderStudentProgressSummary();
   showToast(resubmission ? 'Project resubmitted for instructor review.' : 'Project submitted for instructor review.');
+  syncSubmittedProjectToCloud(updated.find(item => item.name === name));
   return true;
 }
 
@@ -1669,10 +2298,22 @@ async function restoreProjectsFromDatabase() {
           database.close();
         }
         if (projectsChangedDuringStartup) return;
-        const localProjects = getSavedProjects();
-        if (localProjects.length) {
+        const localSnapshot = localStorage.getItem('dangote-academy-projects');
+        let localProjects = null;
+        if (localSnapshot !== null) {
+          try {
+            localProjects = JSON.parse(localSnapshot);
+            if (!Array.isArray(localProjects)) throw new Error('Saved project list is not an array.');
+            localProjects.forEach(validateProjectWorkspace);
+          } catch (error) {
+            console.error('Local project snapshot could not be restored; checking IndexedDB.', error);
+            localProjects = null;
+          }
+        }
+        if (localProjects !== null) {
           await persistProjects(localProjects);
         } else if (databaseProjects.length) {
+          databaseProjects.forEach(validateProjectWorkspace);
           localStorage.setItem('dangote-academy-projects', JSON.stringify(databaseProjects));
           refreshProjectList();
           renderRevisionControls();
@@ -1960,6 +2601,134 @@ function exportProject() {
   URL.revokeObjectURL(link.href);
 }
 
+function createWorkspaceBackup() {
+  const storage = {};
+  workspaceBackupStorageKeys.forEach(key => {
+    const value = localStorage.getItem(key);
+    if (value !== null) storage[key] = value;
+  });
+  return {
+    format: 'dangote-electrical-academy-backup',
+    schemaVersion: 1,
+    exportedAt: new Date().toISOString(),
+    storage
+  };
+}
+
+function validateWorkspaceBackup(backup) {
+  if (!backup || backup.format !== 'dangote-electrical-academy-backup' ||
+    backup.schemaVersion !== 1 || !backup.storage ||
+    typeof backup.storage !== 'object' || Array.isArray(backup.storage)) {
+    throw new Error('Unsupported or invalid workspace backup.');
+  }
+  const allowedKeys = new Set(workspaceBackupStorageKeys);
+  Object.entries(backup.storage).forEach(([key, value]) => {
+    if (!allowedKeys.has(key) || typeof value !== 'string') {
+      throw new Error('Workspace backup contains an unsupported data entry.');
+    }
+    JSON.parse(value);
+  });
+  const projects = backup.storage['dangote-academy-projects'];
+  if (projects !== undefined) {
+    const parsedProjects = JSON.parse(projects);
+    if (!Array.isArray(parsedProjects)) throw new Error('Workspace project list is invalid.');
+    parsedProjects.forEach(project => {
+      if (!project || typeof project.name !== 'string' || !project.name.trim()) {
+        throw new Error('Workspace contains a project with an invalid name.');
+      }
+      validateProjectWorkspace(project);
+    });
+  }
+  return backup;
+}
+
+function applyWorkspaceBackup(backup) {
+  validateWorkspaceBackup(backup);
+  const previous = Object.fromEntries(workspaceBackupStorageKeys.map(key => [key, localStorage.getItem(key)]));
+  try {
+    workspaceBackupStorageKeys.forEach(key => localStorage.removeItem(key));
+    Object.entries(backup.storage).forEach(([key, value]) => localStorage.setItem(key, value));
+  } catch (error) {
+    try {
+      workspaceBackupStorageKeys.forEach(key => {
+        if (previous[key] === null) localStorage.removeItem(key);
+        else localStorage.setItem(key, previous[key]);
+      });
+    } catch (rollbackError) {
+      error.rollbackError = rollbackError;
+      console.error('Previous local data could not be fully restored after a backup failure.', rollbackError);
+    }
+    throw error;
+  }
+}
+
+function exportWorkspaceBackup() {
+  try {
+    const backup = createWorkspaceBackup();
+    const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    link.href = url;
+    link.download = `dangote-academy-backup-${new Date().toISOString().slice(0, 10)}.json`;
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    showToast('Full offline backup exported.');
+    return backup;
+  } catch (error) {
+    console.error('Workspace backup export failed.', error);
+    showToast('Backup could not be created. Check the browser storage and try again.');
+    return null;
+  }
+}
+
+function restoreWorkspaceBackup(event) {
+  const input = event.target;
+  const file = input.files?.[0];
+  if (!file) return;
+  if (file.size > 25 * 1024 * 1024) {
+    showToast('Backup is too large to restore (maximum 25 MB).');
+    input.value = '';
+    return;
+  }
+  const reader = new FileReader();
+  reader.onerror = () => {
+    console.error('Workspace backup file could not be read.', reader.error);
+    showToast('Backup file could not be read.');
+    input.value = '';
+  };
+  reader.onload = async () => {
+    let backup;
+    try {
+      backup = validateWorkspaceBackup(JSON.parse(reader.result));
+    } catch (error) {
+      console.error('Workspace backup failed validation.', error);
+      showToast('Backup is invalid or from an unsupported version; no data was changed.');
+      input.value = '';
+      return;
+    }
+    if (!window.confirm('Restoring this backup replaces this device’s academy data. Export a backup of the current data first if you may need it. Continue?')) {
+      input.value = '';
+      return;
+    }
+
+    try {
+      applyWorkspaceBackup(backup);
+      projectsChangedDuringStartup = true;
+      await persistProjects(JSON.parse(backup.storage['dangote-academy-projects'] || '[]'));
+      showToast('Backup restored. Reloading the workspace.');
+      window.location.reload();
+    } catch (error) {
+      console.error('Workspace backup restore failed.', error);
+      showToast(error.rollbackError
+        ? 'Backup failed and rollback was incomplete. Check this device data before continuing.'
+        : 'Backup could not be restored; the previous local data was kept.');
+    } finally {
+      input.value = '';
+    }
+  };
+  reader.readAsText(file);
+}
+
 function buildEngineeringReport() {
   const projectName = $('#project-name')?.value.trim() || 'Electrical Academy Project';
   const progress = getStudentProgressSummary();
@@ -1979,6 +2748,7 @@ function buildEngineeringReport() {
     schemaVersion: 1,
     reportType: 'unified-engineering-report',
     exportedAt: new Date().toISOString(),
+    engineeringNotice: 'Educational estimates only; no qualified engineering or standards-compliance validation has been completed.',
     project: {
       name: projectName,
       owner: getProfile(),
@@ -2025,10 +2795,11 @@ function exportEngineeringReport() {
   const name = report.project.name.replace(/[^a-z0-9]+/gi, '-').toLowerCase() || 'engineering-report';
   const blob = new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' });
   const link = document.createElement('a');
-  link.href = URL.createObjectURL(blob);
+  const url = URL.createObjectURL(blob);
+  link.href = url;
   link.download = `${name}-engineering-report.json`;
   link.click();
-  URL.revokeObjectURL(link.href);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
   showToast('Unified engineering report exported.');
   return report;
 }
@@ -2113,6 +2884,167 @@ function exportPdf() {
   const data = $$('#boq-body tr').map(row => [...row.cells].slice(0, 6).map((cell, index) => index === 2 ? $('.qty-input', cell).value : cell.textContent.trim()));
   doc.autoTable({ startY: 48, head: [['Description', 'Category', 'Qty', 'Unit', 'Unit price', 'Total']], body: data, theme: 'striped', headStyles: { fillColor: [16, 41, 66] }, styles: { fontSize: 8 } });
   doc.setFontSize(11); doc.setTextColor(16, 41, 66); doc.text(`Total estimate: N ${$('#boq-total').textContent}`, 14, doc.lastAutoTable.finalY + 10); doc.save('Electrical_BOQ_Report.pdf');
+}
+
+function addEngineeringPdfTable(doc, title, rows, columns = ['Item', 'Details']) {
+  let startY = doc.lastAutoTable ? doc.lastAutoTable.finalY + 10 : 42;
+  if (startY > 260) {
+    doc.addPage();
+    startY = 25;
+  }
+  doc.setFontSize(12);
+  doc.setTextColor(16, 41, 66);
+  doc.text(title, 14, startY);
+  doc.autoTable({
+    startY: startY + 4,
+    head: [columns],
+    body: rows.length ? rows : [['No data', 'Not recorded']],
+    theme: 'striped',
+    headStyles: { fillColor: [16, 41, 66] },
+    styles: { fontSize: 8, cellPadding: 2, overflow: 'linebreak' },
+    margin: { left: 14, right: 14 }
+  });
+}
+
+function reportRows(value, prefix = '', depth = 0) {
+  if (depth > 2 || value === null || value === undefined) return [];
+  if (Array.isArray(value)) {
+    return value.slice(0, 12).map((item, index) => [
+      prefix ? `${prefix} ${index + 1}` : `Item ${index + 1}`,
+      typeof item === 'object' ? JSON.stringify(item) : String(item)
+    ]);
+  }
+  if (typeof value !== 'object') return [[prefix || 'Result', String(value)]];
+  return Object.entries(value).flatMap(([key, item]) => {
+    const label = prefix ? `${prefix} · ${key}` : key;
+    if (item && typeof item === 'object') return reportRows(item, label, depth + 1);
+    return [[label, item === null ? 'Not available' : String(item)]];
+  }).slice(0, 24);
+}
+
+function addCircuitDiagramPage(doc, circuit) {
+  doc.addPage();
+  doc.setFontSize(12);
+  doc.setTextColor(16, 41, 66);
+  doc.text('Circuit layout (simplified, not to scale)', 14, 24);
+  const components = circuit?.components || [];
+  const connections = circuit?.connections || [];
+  if (!components.length) {
+    doc.setFontSize(10);
+    doc.text('No circuit components are recorded in this project.', 14, 40);
+    return;
+  }
+  const lefts = components.map(item => Number(item.left) || 0);
+  const tops = components.map(item => Number(item.top) || 0);
+  const minLeft = Math.min(...lefts);
+  const maxLeft = Math.max(...lefts);
+  const minTop = Math.min(...tops);
+  const maxTop = Math.max(...tops);
+  const positions = new Map(components.map(item => [item.id, {
+    x: maxLeft === minLeft ? 105 : 22 + ((Number(item.left) - minLeft) / (maxLeft - minLeft)) * 166,
+    y: maxTop === minTop ? 130 : 50 + ((Number(item.top) - minTop) / (maxTop - minTop)) * 175
+  }]));
+  const conductorColors = {
+    line: [128, 79, 37],
+    'phase-a': [128, 79, 37],
+    'phase-b': [35, 91, 157],
+    'phase-c': [105, 61, 143],
+    neutral: [30, 116, 186],
+    earth: [48, 125, 66]
+  };
+  connections.forEach(connection => {
+    const from = positions.get(connection.from);
+    const to = positions.get(connection.to);
+    if (!from || !to) return;
+    const color = conductorColors[connection.conductor] || [90, 100, 110];
+    doc.setDrawColor(...color);
+    doc.setLineWidth(1);
+    doc.line(from.x, from.y, to.x, to.y);
+  });
+  components.forEach((component, index) => {
+    const point = positions.get(component.id);
+    doc.setDrawColor(16, 41, 66);
+    doc.setFillColor(255, 255, 255);
+    doc.rect(point.x - 19, point.y - 10, 38, 20, 'FD');
+    doc.setFontSize(7);
+    doc.setTextColor(16, 41, 66);
+    doc.text(String(component.type || `Part ${index + 1}`).slice(0, 15), point.x, point.y + 2, { align: 'center' });
+  });
+  doc.setFontSize(8);
+  doc.setTextColor(85, 95, 105);
+  doc.text(`${components.length} components | ${connections.length} connections`, 14, 260);
+  doc.text('Conductor colors are illustrative only; this diagram is not an installation drawing.', 14, 267);
+}
+
+function exportEngineeringReportPdf() {
+  if (!window.jspdf?.jsPDF || typeof window.jspdf.jsPDF.API?.autoTable !== 'function') {
+    showToast('PDF export is unavailable because the bundled PDF libraries did not load.');
+    return false;
+  }
+  try {
+    const report = buildEngineeringReport();
+    const project = report.project;
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF();
+    doc.setTextColor(16, 41, 66);
+    doc.setFontSize(17);
+    doc.text('Dangote Electrical Academy', 14, 20);
+    doc.setFontSize(10);
+    doc.setTextColor(95, 105, 115);
+    doc.text('Unified engineering training report', 14, 28);
+    doc.text(`Project: ${project.name}`, 14, 35);
+    addEngineeringPdfTable(doc, 'Project and review', [
+      ['Owner', project.owner?.name || 'Not recorded'],
+      ['Role', project.owner?.role || 'Not recorded'],
+      ['Status', project.status],
+      ['Exported', new Date(report.exportedAt).toLocaleString()],
+      ['BOQ estimate (NGN)', project.total],
+      ['Engineering validation', 'Not validated for standards compliance']
+    ]);
+    addEngineeringPdfTable(doc, 'Load and cable sizing', reportRows(project.calculation));
+    addEngineeringPdfTable(doc, 'Load schedule', [
+      ...reportRows(project.schedule),
+      ['Validation', project.scheduleValidation.valid ? 'Valid in training model' : project.scheduleValidation.message || 'Incomplete']
+    ]);
+    addEngineeringPdfTable(doc, 'Motor feeder estimate', reportRows(project.motorDesign));
+    addEngineeringPdfTable(doc, 'Circuit validation', [
+      ['Result', project.circuitValidation.valid ? 'Valid in training model' : 'Not validated'],
+      ['Details', project.circuitValidation.message || 'No validation message recorded'],
+      ['Components', String(project.circuit?.components?.length || 0)],
+      ['Connections', String(project.circuit?.connections?.length || 0)]
+    ]);
+    addEngineeringPdfTable(doc, 'Bill of quantities',
+      project.boq.map(item => [
+        item.description,
+        `${item.category} | ${item.quantity} ${item.unit} | NGN ${Number(item.quantity * item.price).toLocaleString('en-NG')}`
+      ]));
+    addEngineeringPdfTable(doc, 'Installation record', project.commissioning.map(item => [
+      item.label || item.name || item.id || 'Check',
+      `${item.status || 'not-recorded'}${item.evidence ? ` | ${item.evidence}` : ''}`
+    ]));
+    addEngineeringPdfTable(doc, 'Learner progress', reportRows(report.learning.progress));
+    addEngineeringPdfTable(doc, 'Review history', (project.review || []).map(item => [
+      `${item.action} | ${item.actor || 'Unknown'}`,
+      `${item.at ? new Date(item.at).toLocaleString() : ''}${item.comment ? ` | ${item.comment}` : ''}`
+    ]));
+    addCircuitDiagramPage(doc, project.circuit);
+    const pageCount = doc.internal.getNumberOfPages();
+    for (let page = 1; page <= pageCount; page += 1) {
+      doc.setPage(page);
+      doc.setFontSize(7);
+      doc.setTextColor(110, 110, 110);
+      doc.text('Training estimates only - not certified engineering advice or authorization to install or energize.', 14, 289);
+      doc.text(`Page ${page} of ${pageCount}`, 196, 289, { align: 'right' });
+    }
+    const name = project.name.replace(/[^a-z0-9]+/gi, '-').toLowerCase() || 'engineering-report';
+    doc.save(`${name}-engineering-report.pdf`);
+    showToast('Engineering report PDF exported.');
+    return true;
+  } catch (error) {
+    console.error('Engineering report PDF export failed.', error);
+    showToast('Engineering report PDF could not be generated.');
+    return false;
+  }
 }
 
 function createComponent(type, x, y, preferredId) {
@@ -3589,7 +4521,10 @@ function initialise() {
   renderAdminTools();
   $$('.nav-item').forEach(item => item.addEventListener('click', () => switchModule(item.dataset.module)));
   $$('[data-go]').forEach(item => item.addEventListener('click', () => switchModule(item.dataset.go)));
-  $('#menu-toggle').addEventListener('click', () => $('#sidebar').classList.toggle('open'));
+  $('#menu-toggle').addEventListener('click', event => {
+    const open = $('#sidebar').classList.toggle('open');
+    event.currentTarget.setAttribute('aria-expanded', String(open));
+  });
   $('#calc-form').addEventListener('submit', calculateLoad);
   const invalidateCalculation = () => {
     invalidateLoadSizingResult();
@@ -3600,7 +4535,10 @@ function initialise() {
   $('#calc-form').addEventListener('invalid', event => { event.preventDefault(); showToast('Enter a load greater than zero and valid factor values.'); }, true);
   $('#add-to-boq').addEventListener('click', () => { if (!lastCalculation) { showToast('Run a calculation first.'); return; } addBoqRow(`${lastCalculation.cable.size}mm² Single Core Copper Wire`, 'Cabling', 1, 'Roll', lastCalculation.cable.size * 15000); addBoqRow(`${lastCalculation.breaker} MCB`, 'Protection', 1, 'Pcs', 4500); switchModule('boq'); showToast('Calculation added to the BOQ.'); });
   $('#boq-body').addEventListener('input', updateBOQ); $('#boq-body').addEventListener('click', event => { if (event.target.closest('.delete-row')) { event.target.closest('tr').remove(); updateBOQ(); } });
-  $('#add-custom-item').addEventListener('click', () => addBoqRow('Custom electrical item', 'General', 1, 'Pcs', 0)); $('#export-pdf').addEventListener('click', exportPdf);
+  $('#add-custom-item').addEventListener('click', () => addBoqRow('Custom electrical item', 'General', 1, 'Pcs', 0)); $('#export-pdf').addEventListener('click', exportPdf); $('#export-report-pdf').addEventListener('click', exportEngineeringReportPdf);
+  $('#export-workspace-backup').addEventListener('click', exportWorkspaceBackup);
+  $('#import-workspace-backup').addEventListener('click', () => $('#workspace-backup-file').click());
+  $('#workspace-backup-file').addEventListener('change', restoreWorkspaceBackup);
   $('#save-project').addEventListener('click', saveNamedProject); $('#submit-project').addEventListener('click', submitNamedProject); $('#project-list').addEventListener('change', () => { loadNamedProject(); renderRevisionControls(); }); $('#delete-project').addEventListener('click', deleteNamedProject); $('#export-project').addEventListener('click', exportProject); $('#export-engineering-report').addEventListener('click', exportEngineeringReport); $('#import-project').addEventListener('click', () => $('#project-file').click()); $('#project-file').addEventListener('change', importProject);
   $('#project-revision-list').addEventListener('change', () => { $('#revision-comparison').textContent = 'Ready to compare selected revision.'; }); $('#compare-revision').addEventListener('click', compareProjectRevisions); $('#restore-revision').addEventListener('click', restoreProjectRevision);
   $('#component-search').addEventListener('input', renderComponentCatalog); $('#component-category').addEventListener('change', renderComponentCatalog);
@@ -3698,6 +4636,13 @@ function initialise() {
   $('#lesson-results').addEventListener('click', event => { const button = event.target.closest('.lesson-check'); if (button) checkLesson(button.dataset.lesson); });
   $('#export-review').addEventListener('click', exportReview);
   $('#save-profile').addEventListener('click', saveProfile);
+  $('#cloud-signin-form').addEventListener('submit', signInToCloud);
+  $('#cloud-set-password-form').addEventListener('submit', setCloudPassword);
+  $('#cloud-profile-form').addEventListener('submit', updateCloudProfile);
+  $('#cloud-signout').addEventListener('click', signOutOfCloud);
+  $('#cloud-create-cohort-form').addEventListener('submit', createCloudCohort);
+  $('#cloud-join-cohort-form').addEventListener('submit', joinCloudCohort);
+  $('#cloud-cohorts').addEventListener('click', reviewCloudProject);
   $('#review-projects').addEventListener('click', event => { const button = event.target.closest('.review-action'); if (button) updateProjectReviewStatus(button.dataset.name, button.dataset.status); });
   $('#review-projects').addEventListener('input', event => {
     if (!event.target.matches('.review-comment-input') || !canReviewProjects()) return;
@@ -3731,6 +4676,7 @@ function initialise() {
   $('#validate-circuit').addEventListener('click', validateCircuit);
   $('#save-circuit').addEventListener('click', saveCircuit); $('#load-circuit').addEventListener('click', loadCircuit); $('#export-circuit').addEventListener('click', exportCircuit); $('#import-circuit').addEventListener('click', () => $('#circuit-file').click()); $('#circuit-file').addEventListener('change', importCircuit);
   calculateLoad({ preventDefault() {} }); calculateSchedule(); calculateMotorFeeder(); updateCircuitSummary(); validateCircuit(); updateCircuitHistoryControls();
+  renderCloudWorkspace();
 }
 
 document.addEventListener('DOMContentLoaded', initialise);

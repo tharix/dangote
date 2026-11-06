@@ -8,8 +8,8 @@
 <body>
   <h1>Browser tests</h1>
   <ul id="results"></ul>
-  <script src="../core.js?v=20261013-plc2"></script>
-  <iframe id="app" src="../index.html?browser-test=1&v=20261013-plc2" hidden title="application under test"></iframe>
+  <script src="../core.js?v=20261106-backup1"></script>
+  <iframe id="app" src="../index.html?browser-test=1&v=20261106-backup1" hidden title="application under test"></iframe>
   <script>
     const results = document.querySelector('#results');
     const tests = [
@@ -552,9 +552,86 @@
         const app = testApp();
         const report = app.buildEngineeringReport();
         return report.schemaVersion === 1 && report.reportType === 'unified-engineering-report' &&
+          report.engineeringNotice.includes('no qualified engineering') &&
           Array.isArray(report.project.boq) && report.project.circuit.version === 2 &&
           report.project.scheduleInputs.rows.length > 0 && report.project.scheduleValidation.valid &&
           report.learning.progress && Number.isInteger(report.learning.progress.attempts);
+      }],
+      ['full workspace backup includes app data and rejects unknown storage keys', () => {
+        const app = testApp();
+        app.localStorage.setItem('dangote-academy-lessons', JSON.stringify({ 'safe-topology': { completedAt: '2026-01-01' } }));
+        const oldSession = app.sessionStorage.getItem('dangote-academy-cloud-session');
+        app.sessionStorage.setItem('dangote-academy-cloud-session', JSON.stringify({ accessToken: 'not-for-backup' }));
+        const backup = app.createWorkspaceBackup();
+        const valid = backup.format === 'dangote-electrical-academy-backup' &&
+          backup.storage['dangote-academy-lessons'] &&
+          !JSON.stringify(backup).includes('not-for-backup') &&
+          app.validateWorkspaceBackup(backup) === backup;
+        if (oldSession === null) app.sessionStorage.removeItem('dangote-academy-cloud-session');
+        else app.sessionStorage.setItem('dangote-academy-cloud-session', oldSession);
+        if (!valid) return false;
+        backup.storage['dangote-academy-untrusted'] = '{}';
+        try {
+          app.validateWorkspaceBackup(backup);
+        } catch {
+          return true;
+        }
+        return false;
+      }],
+      ['backup restore replaces only known academy data after validating it', () => {
+        const app = testApp();
+        app.localStorage.setItem('dangote-academy-lessons', JSON.stringify({ old: true }));
+        app.localStorage.setItem('dangote-academy-profile', JSON.stringify({ name: 'Old profile' }));
+        const backup = {
+          format: 'dangote-electrical-academy-backup',
+          schemaVersion: 1,
+          storage: { 'dangote-academy-lessons': JSON.stringify({ restored: true }) }
+        };
+        app.applyWorkspaceBackup(backup);
+        const applied = JSON.parse(app.localStorage.getItem('dangote-academy-lessons'));
+        if (!applied.restored || app.localStorage.getItem('dangote-academy-profile') !== null) return false;
+        const invalid = {
+          format: 'dangote-electrical-academy-backup',
+          schemaVersion: 1,
+          storage: { 'dangote-academy-projects': JSON.stringify([{ name: 'Invalid', rows: [], circuit: {} }]) }
+        };
+        try {
+          app.applyWorkspaceBackup(invalid);
+        } catch {
+          return JSON.parse(app.localStorage.getItem('dangote-academy-lessons')).restored;
+        }
+        return false;
+      }],
+      ['engineering PDF report table renders with the bundled PDF libraries', () => {
+        const app = testApp();
+        if (!app.jspdf?.jsPDF || typeof app.jspdf.jsPDF.API?.autoTable !== 'function') return false;
+        const pdf = new app.jspdf.jsPDF();
+        app.addEngineeringPdfTable(pdf, 'Test section', [['Field', 'Value']]);
+        app.addCircuitDiagramPage(pdf, {
+          components: [{ id: 'source', type: 'source-ac', left: 0, top: 0 }, { id: 'lamp', type: 'lamp', left: 120, top: 20 }],
+          connections: [{ from: 'source', to: 'lamp', conductor: 'line' }]
+        });
+        return pdf.lastAutoTable?.finalY > 0 && pdf.internal.getNumberOfPages() === 2;
+      }],
+      ['cloud accounts stay unavailable when the public project configuration is blank', () => {
+        const app = testApp();
+        return app.getCloudConfiguration() === null &&
+          app.document.querySelector('#cloud-signin-form').hidden &&
+          app.document.querySelector('#cloud-status').textContent.includes('Offline features continue to work');
+      }],
+      ['accessibility styles provide visible focus and honor reduced-motion preferences', () => {
+        const app = testApp();
+        const stylesheet = Array.from(app.document.styleSheets).some(sheet => {
+          try {
+            return Array.from(sheet.cssRules).some(rule =>
+              rule.cssText.includes(':focus-visible') || rule.cssText.includes('prefers-reduced-motion')
+            );
+          } catch {
+            return false;
+          }
+        });
+        return stylesheet && app.document.querySelector('.skip-link')?.getAttribute('href') === '#main-content' &&
+          app.document.querySelector('#main-content')?.tagName === 'MAIN';
       }],
       ['revision comparison and restore return saved workspace state', () => {
         const app = testApp();

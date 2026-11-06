@@ -820,3 +820,31 @@ input:focus, select:focus, textarea:focus {
   .plc-instruction label { flex: 1 1 125px; }
   .plc-instruction input, .plc-instruction select { width: 100%; max-width: none; }
 }
+
+[hidden] { display: none !important; }
+:where(button, a, input, select, textarea, [tabindex]):focus-visible {
+  outline: 3px solid #005fcc;
+  outline-offset: 3px;
+}
+button:disabled { cursor: not-allowed; opacity: .68; }
+.data-safety-panel { display: grid; gap: 16px; margin-top: 20px; }
+.data-safety-panel .button-row { gap: 10px; flex-wrap: wrap; }
+.cloud-panel { margin-top: 20px; }
+.cloud-signin-form, .cloud-inline-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); align-items: end; gap: 12px; }
+.cloud-account-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.cloud-cohorts { display: grid; gap: 14px; }
+.cloud-cohort-card { display: grid; gap: 12px; padding: 16px; border: 1px solid var(--line); }
+.cloud-cohort-card h4 { margin: 0; }
+.cloud-project-row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; padding: 9px 0; border-top: 1px solid var(--line); }
+.cloud-project-row > span:first-child { flex: 1 1 200px; }
+.cloud-project-row textarea { min-height: 42px; }
+.cloud-project-evidence { flex: 1 1 100%; }
+.cloud-project-evidence pre { max-height: 260px; overflow: auto; padding: 10px; white-space: pre-wrap; overflow-wrap: anywhere; background: var(--canvas); font-size: 11px; }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    scroll-behavior: auto !important;
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+  }
+}

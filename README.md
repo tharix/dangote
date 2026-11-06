@@ -2,7 +2,7 @@
 
 Static, offline-capable training workspace for electrical load sizing, load schedules, BOQs, component selection, low-voltage electronics design, circuit simulation, and troubleshooting exercises.
 
-The current browser experience remains usable offline. Supabase integration is prepared through [supabase-config.js](./supabase-config.js) and the migration in [supabase/schema.sql](./supabase/schema.sql); configure those before enabling account-backed project storage.
+The current browser experience remains usable offline. Optional Supabase sign-in, cohort membership, cloud project submission, instructor review, and a class dashboard are implemented but inactive until a Supabase project is configured. Apply the reviewed SQL in [supabase/schema.sql](./supabase/schema.sql), then set the project URL and public anon key in [supabase-config.js](./supabase-config.js). Never place a service-role key in the browser app.
 
 ## Development
 
@@ -65,7 +65,7 @@ Three-phase load schedules assign each circuit to Phase A, B, or C and report ph
 
 ## Offline project storage
 
-Named projects contain the BOQ, load schedule, cable-sizing inputs, and circuit diagram together, with up to ten previous snapshots retained as revisions. Loading a project or revision restores its sizing inputs and recalculates the result; students must save sizing-input edits before submitting. Projects are written to IndexedDB for larger offline-safe storage and mirrored to localStorage as a compatibility fallback. Use **Export project** and **Import project** to move a complete project between devices without a server.
+Named projects contain the BOQ, load schedule, cable-sizing inputs, and circuit diagram together, with up to ten previous snapshots retained as revisions. Loading a project or revision restores its sizing inputs and recalculates the result; students must save sizing-input edits before submitting. Projects are written to IndexedDB for larger offline-safe storage and mirrored to localStorage as a compatibility fallback. Use **Export project** and **Import project** to move a complete project between devices without a server. The Profile module also exports a versioned full-device JSON backup of known academy storage and validates it before restoring; restore replaces the academy data on that browser, so save the current device state first. Keep backup files private.
 
 ## Guided learning and review
 
@@ -73,9 +73,20 @@ The Lessons module provides practical circuit exercises with hints, offline prog
 
 Offline profiles support student, instructor, and administrator roles. Saved projects can be reviewed locally, marked approved, or returned for changes; reviewer name and timestamps are stored with the project.
 
-The project workspace can export a unified engineering report containing the calculation, motor feeder estimate, load schedule, installation record, BOQ, circuit validation, review history, and learning progress. Saved project revisions can be compared and restored to the workspace before saving; comparisons include BOQ, circuit components and connections, load schedule, motor design, installation checks, and review status. Students submit saved work for review; instructors approve or request changes with comments and a resubmission history; administrators can manage the local project directory. Troubleshooting attempts and completed scenarios are stored offline and included in the student progress summary.
+The project workspace can export a unified engineering report as JSON or PDF containing the calculation, motor feeder estimate, load schedule, installation record, BOQ, circuit validation, review history, and learning progress. Reports explicitly state that their estimates have not been independently validated for standards compliance. Saved project revisions can be compared and restored to the workspace before saving; comparisons include BOQ, circuit components and connections, load schedule, motor design, installation checks, and review status. Students submit saved work for review; instructors approve or request changes with comments and a resubmission history; administrators can manage the local project directory. Troubleshooting attempts and completed scenarios are stored offline and included in the student progress summary.
 
-Role selection and role-based controls are local workflow conveniences only; this static offline application does not authenticate users or enforce authorization against a server. Do not use them as a security boundary for confidential student records.
+Offline role selection and role-based controls are local workflow conveniences only and must not be used as a security boundary. When Supabase is configured, cloud authorization is based on the server-managed profile and cohort membership policies, not on the local role selector. Until a project is configured, the cloud dashboard and server-side authorization are unavailable. Have a qualified electrical designer review the calculation methods against the applicable local standard before relying on them for any real project.
+
+### Enabling optional cloud accounts
+
+1. Create a Supabase project and apply [supabase/schema.sql](./supabase/schema.sql) in its SQL editor.
+2. Copy the project URL and public anon/publishable key into [supabase-config.js](./supabase-config.js). These browser-visible values are not secrets; database permissions must remain enforced by RLS.
+3. Configure Supabase Auth's site URL and redirect allowlist for the deployed app, then invite users through Supabase Auth. Invitation and recovery links return to the app, where users must set a 12-character-minimum password. Profiles are created as students by default. A trusted project administrator must assign instructor roles in the database; never let a browser choose its server role.
+4. An instructor signs in, creates a cohort, and shares its invite code with enrolled students. Students sign in and join using that code. Cloud submissions and review actions are checked by database policies and triggers.
+
+The browser keeps its access and refresh tokens in session-scoped storage, not in full-device backups. Use HTTPS in deployment. The local profile role remains editable and is never the cloud authorization source. Instructor cohort views are limited by RLS to their memberships; review actions are recorded by a database trigger. Apply the migration to a test Supabase project and verify its policies before using real learner records.
+
+Keyboard users can move through controls using visible focus indicators. The interface honors reduced-motion preferences and exposes the skip link and live status messages. These improvements do not by themselves establish conformance to WCAG; test with assistive technology before making an accessibility-conformance claim.
 
 The circuit toolbox also includes a five-second timer relay and a manually toggled relay. Timer components begin open and close after the simulated delay; relay components can be toggled during a simulation. Building fault scenarios cover motor overloads, intermittent lighting, and heat-damaged outlets as well as timer and relay faults. The separate Power Station Diagnostics Lab uses evidence-led scenarios for generator and transformer protection, excitation and voltage regulation, prime movers, rotating equipment, auxiliary systems, and grid disturbances. It practices correlating alarms, time-sequenced events, trends, independent indications, and specialist escalation; cases and progress are stored offline and included in training exports.
 

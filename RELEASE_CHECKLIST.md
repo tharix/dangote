@@ -9,6 +9,9 @@ Use this checklist before publishing a production change.
 - [ ] Run `npm run check`.
 - [ ] Open `tests/browser-test.html` and confirm every test passes.
 - [ ] Manually exercise the affected workflow in a local static server.
+- [ ] Export and restore a backup with sample data, including an empty project list.
+- [ ] Generate the unified engineering PDF and inspect its sections and circuit page.
+- [ ] Check keyboard focus, reduced-motion behavior, and mobile layout.
 - [ ] Confirm no credentials, generated files, or external runtime dependencies were added.
 
 ## Review and merge
@@ -17,6 +20,7 @@ Use this checklist before publishing a production change.
 - [ ] Obtain the required CODEOWNER review.
 - [ ] Confirm the quality workflow is green.
 - [ ] Confirm the deployment workflow is green.
+- [ ] If cloud features are enabled, apply and verify the Supabase schema/RLS on a test project first.
 - [ ] Merge only after the pull request checks pass.
 
 ## Production verification
