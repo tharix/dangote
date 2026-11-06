@@ -407,15 +407,15 @@ const standardsReviewCrosswalk = [
   },
   {
     topic: 'Document status and applicable editions',
-    model: 'The supplied NESIS document is a 2015 publication; its normative references list BS 7671:2008 and several NIS IEC documents. The public-source check did not establish whether NESIS remains current or which listed standards editions apply today.',
-    references: 'NESIS 2015 sections 1.2-1.3 (PDF pp. 12-15); NEMSA regulations: https://web.nemsa.gov.ng/regulations; NEMSA roles: https://nemsa.gov.ng/our-roles/; SON standards library: https://son.gov.ng/library-services/; IET BS 7671: https://electrical.theiet.org/bs-7671-18th-edition-wiring-regulations/; BSI catalogue: https://knowledge.bsigroup.com/products/requirements-for-electrical-installations-i-et-wiring-regulations.',
-    review: 'The published regulator/library pages reviewed did not settle current NESIS legal status, amendments, NIS IEC editions, BS 7671 edition, or NCP 09 edition. Obtain confirmation from NEMSA/SON and the current controlled standards before using any clause as a design basis.'
+    model: 'NESIS 2015 references BS 7671:2008. A 2025 NEMSA accreditation certificate (valid to 24 July 2029) lists NESIS 2015 among applicable documents, supporting current administrative use; formal legal continuation under the Electricity Act 2023 is not expressly confirmed by the sources reviewed.',
+    references: 'NESIS 2015 sections 1.2-1.3 (PDF pp. 12-15); NEMSA accreditation certificate (2025, valid to 24 July 2029): https://nemsa.gov.ng/wp-content/uploads/2025/08/NEMSA_Accreditation_Certificate.pdf; IET BS 7671:2018+A4:2026: https://electrical.theiet.org/guidance-and-codes-of-practice/publications-by-category/amendment-42026-to-bs-76712018-iet-wiring-regulations/; SON Digital Standards Platform: https://nnsdp.son.gov.ng/.',
+    review: 'Strong evidence supports NEMSA administrative use of NESIS 2015, but confirm its current legal basis and project scope with NEMSA. The IET now publishes BS 7671:2018+A4:2026; this does not by itself amend NESIS’s 2008 reference for Nigeria. Obtain controlled SON editions/amendments for each applicable NIS IEC standard and NCP 09; their current editions remain unverified.'
   },
   {
     topic: 'Reviewer authorization and installation certification',
-    model: 'Reviewer identity, degree, registration details, and declaration are self-entered. The application cannot validate a person, license, competency, or authority to certify an installation.',
-    references: 'NEMSA roles: https://nemsa.gov.ng/our-roles/; NEMSA installation contractor/personnel certification is referenced on its official site.',
-    review: 'The public material reviewed identifies NEMSA as the inspection, testing, and installation-certification authority, but does not establish a complete individual credential/authorization route. Confirm the reviewer’s applicable NEMSA authorization and scope directly with NEMSA; a degree alone is not represented as certification authority.'
+    model: 'Reviewer identity and credentials are self-entered. NEMSA publishes category-based individual and corporate electrical-installation certification processes; the app cannot validate a person, certificate, category, competency, or signing authority.',
+    references: 'NEMSA certification process and scheme: https://nemsa.gov.ng/competency-certification/ and https://nemsa.gov.ng/wp-content/uploads/2025/04/UPDATED_REVISED-CERTIFICATION-SCHEMES_Signed-Copy-14052024.pdf; NEMSA roles: https://nemsa.gov.ng/our-roles/.',
+    review: 'Confirm the reviewer’s current NEMSA certificate, applicable category, work scope, and authority for this specific design review or installation certificate. The scheme is category-based and requires qualifications and experience evidence; the corporate engineer route includes interview/examination. The applicable signing authority for each certificate type still needs direct confirmation with NEMSA; a degree alone is not proof.'
   },
   {
     topic: 'ECOWAS source supplied',
@@ -2100,15 +2100,17 @@ function getDefaultStandardsReviewSnapshot() {
     amendments: '',
     reviewerName: '',
     reviewerQualification: '',
+    reviewerAuthorizationReference: '',
     reviewerOrganization: '',
     reviewDate: '',
     sourceReferences: [
       'NEMSA NESIS Regulations 2015: https://nemsa.gov.ng/wp-content/uploads/2019/11/NESIS-Regulations-2015-1-1.pdf',
       'NEMSA standards, policies and guidelines: https://web.nemsa.gov.ng/regulations',
-      'IEC: https://www.iec.ch',
       'ECOWAS document supplied for review: https://eis.ecowas.int/assets/front/medias/doc/media_20231011104957.pdf',
       'Standards Organisation of Nigeria: https://son.gov.ng/',
-      'ECREEE: https://www.ecreee.org/'
+      'SON Digital Standards Platform: https://nnsdp.son.gov.ng/',
+      'NEMSA accreditation: https://nemsa.gov.ng/wp-content/uploads/2025/08/NEMSA_Accreditation_Certificate.pdf',
+      'NEMSA certification route: https://nemsa.gov.ng/competency-certification/'
     ].join('\n'),
     reviewerDeclaration: false,
     checks: standardsReviewChecks.map(check => ({ id: check.id, status: 'not-reviewed', note: '' }))
@@ -2127,12 +2129,14 @@ function isValidStandardsReviewSnapshot(review) {
     amendments: 300,
     reviewerName: 100,
     reviewerQualification: 160,
+    reviewerAuthorizationReference: 180,
     reviewerOrganization: 140,
     sourceReferences: 600
   };
   return Boolean(review && typeof review === 'object' && !Array.isArray(review) &&
     Object.entries(textLimits).every(([key, maxLength]) =>
-      typeof review[key] === 'string' && review[key].length <= maxLength) &&
+      (key === 'reviewerAuthorizationReference' && review[key] === undefined ||
+        typeof review[key] === 'string' && review[key].length <= maxLength)) &&
     typeof review.reviewerDeclaration === 'boolean' &&
     typeof review.reviewDate === 'string' &&
     (review.reviewDate === '' || /^\d{4}-\d{2}-\d{2}$/.test(review.reviewDate)) &&
@@ -2159,6 +2163,7 @@ function getStandardsReviewSnapshot() {
     amendments: $('#standards-amendments')?.value.trim() || '',
     reviewerName: $('#standards-reviewer-name')?.value.trim() || '',
     reviewerQualification: $('#standards-reviewer-qualification')?.value.trim() || '',
+    reviewerAuthorizationReference: $('#standards-reviewer-authorization')?.value.trim() || '',
     reviewerOrganization: $('#standards-reviewer-organization')?.value.trim() || '',
     reviewDate: $('#standards-review-date')?.value || '',
     sourceReferences: $('#standards-source-references')?.value.trim() || '',
@@ -2170,6 +2175,7 @@ function getStandardsReviewSnapshot() {
 function standardsReviewRecordStatus(review) {
   const completeBasis = Boolean(review.jurisdiction && review.standard && review.edition);
   const completeReviewer = Boolean(review.reviewerName && review.reviewerQualification &&
+    review.reviewerAuthorizationReference &&
     review.reviewDate && review.reviewerDeclaration);
   const resolvedChecks = review.checks.every(item =>
     ['reviewed-acceptable', 'action-required', 'not-applicable'].includes(item.status));
@@ -2185,6 +2191,7 @@ function renderStandardsReview(review = getDefaultStandardsReviewSnapshot()) {
   $('#standards-amendments').value = review.amendments;
   $('#standards-reviewer-name').value = review.reviewerName;
   $('#standards-reviewer-qualification').value = review.reviewerQualification;
+  $('#standards-reviewer-authorization').value = review.reviewerAuthorizationReference || '';
   $('#standards-reviewer-organization').value = review.reviewerOrganization;
   $('#standards-review-date').value = review.reviewDate;
   $('#standards-source-references').value = review.sourceReferences;
@@ -3264,6 +3271,7 @@ function exportEngineeringReportPdf() {
       ['Amendments', project.standardsReview.amendments || 'Not recorded'],
       ['Reviewer', project.standardsReview.reviewerName || 'Not recorded'],
       ['Qualification / registration', project.standardsReview.reviewerQualification || 'Not recorded'],
+      ['NEMSA certificate category / authorization reference', project.standardsReview.reviewerAuthorizationReference || 'Not recorded'],
       ['Organization', project.standardsReview.reviewerOrganization || 'Not recorded'],
       ['Review date', project.standardsReview.reviewDate || 'Not recorded'],
       ['Reviewer self-declaration', project.standardsReview.reviewerDeclaration ? 'Provided; not verified by the app' : 'Not provided'],

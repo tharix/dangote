@@ -561,15 +561,20 @@
         const app = testApp();
         const defaults = app.getDefaultStandardsReviewSnapshot();
         const crosswalk = app.getStandardsReviewCrosswalk();
+        const legacyReview = { ...defaults };
+        delete legacyReview.reviewerAuthorizationReference;
         if (!app.isValidStandardsReviewSnapshot(defaults) ||
+          !app.isValidStandardsReviewSnapshot(legacyReview) ||
           app.standardsReviewRecordStatus(defaults) !== 'Record incomplete' ||
           defaults.jurisdiction !== 'Nigeria' ||
           defaults.edition !== '2015' ||
           !defaults.standard.includes('proposed basis') ||
           !defaults.sourceReferences.includes('nemsa.gov.ng/wp-content/uploads/2019/11/NESIS-Regulations-2015-1-1.pdf') ||
-          defaults.reviewerName !== '' || defaults.reviewerDeclaration ||
+          !defaults.sourceReferences.includes('NEMSA accreditation:') ||
+          defaults.reviewerName !== '' || defaults.reviewerAuthorizationReference !== '' || defaults.reviewerDeclaration ||
           crosswalk.length < 8 ||
           !crosswalk.find(item => item.topic === 'Load, current, and schedule demand')?.review.includes('diversity') ||
+          !crosswalk.find(item => item.topic === 'Document status and applicable editions')?.model.includes('current administrative use') ||
           !crosswalk.find(item => item.topic === 'ECOWAS source supplied')?.model.includes('not a wiring-installation code') ||
           !crosswalk.find(item => item.topic === 'Reviewer authorization and installation certification')?.review.includes('a degree alone')) return false;
         app.document.querySelector('#standards-jurisdiction').value = 'Test jurisdiction';
@@ -577,6 +582,7 @@
         app.document.querySelector('#standards-edition').value = '2026';
         app.document.querySelector('#standards-reviewer-name').value = 'Qualified Reviewer';
         app.document.querySelector('#standards-reviewer-qualification').value = 'Test credential';
+        app.document.querySelector('#standards-reviewer-authorization').value = 'Category D / test reference';
         app.document.querySelector('#standards-review-date').value = '2026-11-06';
         app.document.querySelector('#standards-reviewer-declaration').checked = true;
         app.document.querySelectorAll('.standards-review-status').forEach(select => {
