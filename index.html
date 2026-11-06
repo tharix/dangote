@@ -9,12 +9,12 @@
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:; connect-src 'self' https://*.supabase.co; object-src 'none'; base-uri 'self'; form-action 'self';">
   <title>Dangote Academy Electrical</title>
   <link rel="stylesheet" href="assets/vendor/fontawesome/fontawesome.min.css">
-  <link rel="stylesheet" href="styles.css?v=20261013-plc1">
+  <link rel="stylesheet" href="styles.css?v=20261013-plc2">
   <script src="assets/vendor/jspdf/jspdf.umd.min.js" defer></script>
   <script src="assets/vendor/jspdf/jspdf.plugin.autotable.min.js" defer></script>
   <script src="supabase-config.js" defer></script>
-  <script src="core.js?v=20261013-plc1" defer></script>
-  <script src="script.js?v=20261013-plc1" defer></script>
+  <script src="core.js?v=20261013-plc2" defer></script>
+  <script src="script.js?v=20261013-plc2" defer></script>
 </head>
 <body>
   <a class="skip-link" href="#main-content">Skip to main content</a>
@@ -82,7 +82,7 @@
               <button class="route-step" data-go="troubleshooting"><span class="route-number">04</span><span class="route-icon"><i class="fa-solid fa-stethoscope"></i></span><strong>Practice diagnosis</strong><small>Follow evidence and safe responses</small><i class="fa-solid fa-arrow-right route-arrow"></i></button>
             </div>
           </div>
-          <div class="stats-grid"><article class="stat-card blue"><span>Saved projects</span><strong id="dashboard-project-count">0</strong><small>Stored on this device</small></article><article class="stat-card green"><span>Lessons completed</span><strong id="dashboard-lesson-count">0 / 0</strong><small>Offline learning progress</small></article><article class="stat-card violet"><span>Scenarios solved</span><strong id="dashboard-scenario-count">0 / 0</strong><small>Building troubleshooting</small><small id="dashboard-station-count">Power-station cases 0 / 8</small><small id="dashboard-electronics-count">Electronics cases 0 / 6</small></article><article class="stat-card yellow"><span>BOQ line items</span><strong id="dashboard-boq-count">0</strong><small>In the current workspace</small></article></div>
+          <div class="stats-grid"><article class="stat-card blue"><span>Saved projects</span><strong id="dashboard-project-count">0</strong><small>Stored on this device</small></article><article class="stat-card green"><span>Lessons completed</span><strong id="dashboard-lesson-count">0 / 0</strong><small>Offline learning progress</small></article><article class="stat-card violet"><span>Scenarios solved</span><strong id="dashboard-scenario-count">0 / 0</strong><small>Building troubleshooting</small><small id="dashboard-station-count">Power-station cases 0 / 8</small><small id="dashboard-electronics-count">Electronics cases 0 / 6</small><small id="dashboard-plc-count">PLC challenges 0 / 3</small></article><article class="stat-card yellow"><span>BOQ line items</span><strong id="dashboard-boq-count">0</strong><small>In the current workspace</small></article></div>
           <div class="dashboard-grid"><article class="panel activity-panel"><div class="panel-heading"><div><p class="eyebrow">On this device</p><h3>Recent workspace activity</h3></div><button class="text-button" data-go="review">Open project review</button></div><div class="activity-list" id="dashboard-activity"></div></article><article class="panel"><div class="panel-heading"><div><p class="eyebrow">Get started</p><h3>Quick actions</h3></div></div><div class="quick-actions"><button data-go="calculators"><i class="fa-solid fa-calculator"></i><span>Start load calculation</span><i class="fa-solid fa-arrow-right"></i></button><button data-go="circuit-builder"><i class="fa-solid fa-diagram-project"></i><span>Build a circuit</span><i class="fa-solid fa-arrow-right"></i></button><button data-go="lessons"><i class="fa-solid fa-graduation-cap"></i><span>Continue a lesson</span><i class="fa-solid fa-arrow-right"></i></button></div></article></div>
         </section>
 
@@ -203,11 +203,12 @@
           <div class="section-heading"><div><p class="eyebrow accent">Industrial control simulation</p><h2>PLC ladder logic simulator</h2><p class="muted">Edit ladder contacts, toggle a simulated I/O image, and watch outputs update on each scan.</p></div><span class="demo-note"><i class="fa-solid fa-hard-drive"></i> Runs offline</span></div>
           <p class="installation-safety-note">Training model only. This is not a PLC programming environment or safety-rated controller. Do not use it to design, test, commission, bypass, or operate real machinery. Emergency stops and safety functions must use correctly engineered, independently verified hardware and software.</p>
           <div class="plc-toolbar panel">
-            <label>Example program<select id="plc-program"><option value="motor-starter">Motor starter · seal-in and overload</option><option value="conveyor">Conveyor · guard and jam interlocks</option><option value="tank-pump">Tank pump · level demand</option></select></label>
+            <label>Example program<select id="plc-program"><option value="motor-starter">Motor starter · seal-in and overload</option><option value="conveyor">Conveyor · guard and jam interlocks</option><option value="tank-pump">Tank pump · level demand</option><option value="analog-level">Analog level · comparator and valve</option></select></label>
             <label>Injected fault<select id="plc-fault"><option value="none">None</option><option value="input-open">Target input forced OFF</option><option value="input-short">Target input forced ON</option><option value="output-inhibit">Target output inhibited</option></select></label>
             <label>Fault target<select id="plc-fault-target" aria-label="Fault target"></select></label>
             <div class="button-row"><button class="secondary-button" id="plc-add-rung"><i class="fa-solid fa-plus"></i> Add rung</button><button class="secondary-button" id="plc-reset"><i class="fa-solid fa-rotate-left"></i> Reset example</button></div>
             <div class="button-row"><button class="primary-button" id="plc-scan"><i class="fa-solid fa-forward-step"></i> Single scan</button><button class="success-button" id="plc-run"><i class="fa-solid fa-play"></i> Run scans</button></div>
+            <div class="button-row plc-file-actions"><button class="secondary-button" id="plc-export">Export PLC program</button><button class="secondary-button" id="plc-import">Import PLC program</button><input id="plc-file" type="file" accept="application/json" hidden></div>
           </div>
           <div class="plc-status panel" role="status" aria-live="polite"><span id="plc-status-text">Ready. Select an input or run a scan.</span><span>Scan <b id="plc-scan-count">0</b></span></div>
           <div class="plc-workspace">
@@ -220,9 +221,30 @@
               <div class="plc-output-grid" id="plc-outputs"></div>
             </article>
           </div>
+          <article class="panel plc-watch-panel">
+            <div class="panel-heading"><div><p class="eyebrow">Live data table</p><h3>Analog watch table</h3></div><span class="plc-indicator">Illustrative 0–100% scaling</span></div>
+            <div id="plc-watch-table"></div>
+          </article>
           <article class="panel plc-ladder-panel">
             <div class="panel-heading"><div><p class="eyebrow">Program editor</p><h3>Ladder logic</h3></div><span class="plc-indicator">Parallel branches = OR · series contacts = AND</span></div>
             <div class="plc-ladder" id="plc-ladder" aria-label="Editable PLC ladder diagram"></div>
+          </article>
+          <article class="panel plc-explanation-panel">
+            <div class="panel-heading"><div><p class="eyebrow">Scan trace</p><h3>Why did the PLC do that?</h3></div></div>
+            <div id="plc-explanation"><p class="plot-placeholder">Run a scan to see contact, branch, timer, and counter decisions.</p></div>
+          </article>
+          <article class="panel plc-challenge-panel">
+            <div class="panel-heading"><div><p class="eyebrow">Guided practice</p><h3>Ladder challenges</h3></div><span class="score-pill">Passed <b id="plc-challenge-score">0</b>/<b id="plc-challenge-total">3</b></span></div>
+            <div class="plc-challenge-controls">
+              <label>Challenge<select id="plc-challenge"></select></label>
+              <button class="primary-button" id="plc-check-challenge">Check program</button>
+            </div>
+            <p id="plc-challenge-guidance" class="muted"></p>
+            <p id="plc-challenge-feedback" class="plc-feedback" role="status" aria-live="polite"></p>
+          </article>
+          <article class="plc-diagnostics-panel">
+            <div class="panel-heading"><div><p class="eyebrow">Evidence-led faults</p><h3>PLC troubleshooting cases</h3></div><span class="score-pill">Solved <b id="plc-diagnostics-score">0</b>/<b id="plc-diagnostics-total">3</b></span></div>
+            <div class="troubleshooting-grid" id="plc-diagnostic-results"></div>
           </article>
           <article class="panel plot-panel plc-plot-panel">
             <div class="panel-heading"><div><p class="eyebrow">Scan history</p><h3>Digital output trend</h3></div></div>

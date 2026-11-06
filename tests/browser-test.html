@@ -8,12 +8,49 @@
 <body>
   <h1>Browser tests</h1>
   <ul id="results"></ul>
-  <script src="../core.js?v=20261013-plc1"></script>
-  <iframe id="app" src="../index.html?browser-test=1&v=20261013-plc1" hidden title="application under test"></iframe>
+  <script src="../core.js?v=20261013-plc2"></script>
+  <iframe id="app" src="../index.html?browser-test=1&v=20261013-plc2" hidden title="application under test"></iframe>
   <script>
     const results = document.querySelector('#results');
     const tests = [
       ['valid load sizing', () => DangoteAcademyCore.calculateLoadSizing({ phase: 1, loadType: 'kw', loadValue: 10, pf: .85, diversity: .8, installMethod: 'conduit' }).valid],
+      ['PLC TON exposes done after its preset and resets when its rung drops out', () => {
+        const program = { rungs: [
+          { branches: [[{ tag: 'I0.0', normallyClosed: false }]], coil: 'Q0.0', timer: { tag: 'T0', presetScans: 2 } },
+          { branches: [[{ tag: 'T0.DN', normallyClosed: false }]], coil: 'Q0.1' }
+        ] };
+        const first = DangoteAcademyCore.calculatePlcScan(program, { 'I0.0': true }, {});
+        const second = DangoteAcademyCore.calculatePlcScan(program, { 'I0.0': true }, first.outputs, first.runtimeState);
+        const reset = DangoteAcademyCore.calculatePlcScan(program, { 'I0.0': false }, second.outputs, second.runtimeState);
+        return !first.outputs['Q0.1'] && second.outputs['Q0.1'] &&
+          second.runtimeState.timers.T0.done && reset.runtimeState.timers.T0.elapsedScans === 0 &&
+          !reset.outputs['Q0.1'];
+      }],
+      ['PLC CTU counts rising edges once and resets on its configured input', () => {
+        const program = { rungs: [
+          { branches: [[{ tag: 'I0.0', normallyClosed: false }]], coil: 'Q0.0', counter: { tag: 'C0', preset: 2, resetTag: 'I0.5' } },
+          { branches: [[{ tag: 'C0.DN', normallyClosed: false }]], coil: 'Q0.1' }
+        ] };
+        let result = DangoteAcademyCore.calculatePlcScan(program, { 'I0.0': true }, {});
+        result = DangoteAcademyCore.calculatePlcScan(program, { 'I0.0': true }, result.outputs, result.runtimeState);
+        if (result.runtimeState.counters.C0.count !== 1) return false;
+        result = DangoteAcademyCore.calculatePlcScan(program, { 'I0.0': false }, result.outputs, result.runtimeState);
+        result = DangoteAcademyCore.calculatePlcScan(program, { 'I0.0': true }, result.outputs, result.runtimeState);
+        const done = result.outputs['Q0.1'] && result.runtimeState.counters.C0.count === 2;
+        result = DangoteAcademyCore.calculatePlcScan(program, { 'I0.0': true, 'I0.5': true }, result.outputs, result.runtimeState);
+        return done && result.runtimeState.counters.C0.count === 0 && !result.outputs['Q0.1'];
+      }],
+      ['PLC rejects unavailable digital addresses and counter reset points', () => {
+        const program = { rungs: [{
+          branches: [[{ tag: 'I0.0', normallyClosed: false }]],
+          coil: 'Q0.0',
+          counter: { tag: 'C0', preset: 2, resetTag: 'I0.9' }
+        }] };
+        const badImage = DangoteAcademyCore.calculatePlcScan({
+          rungs: [{ branches: [[{ tag: 'I0.0', normallyClosed: false }]], coil: 'Q0.0' }]
+        }, { 'I0.9': true }, {});
+        return !DangoteAcademyCore.validatePlcProgram(program).valid && !badImage.valid;
+      }],
       ['dashboard reports local data and safely escapes project names', () => {
         const app = testApp();
         const keys = ['dangote-academy-projects', 'dangote-academy-lessons', 'dangote-academy-troubleshooting', 'dangote-academy-installation', 'dangote-academy-station-diagnostics', 'dangote-academy-electronics-diagnostics'];
@@ -576,7 +613,7 @@
         const app = testApp();
         app.localStorage.removeItem('dangote-academy-troubleshooting');
         app.renderTroubleshooting();
-        const card = app.document.querySelector('.scenario-card');
+        const card = app.document.querySelector('#troubleshooting-results .scenario-card');
         const option = card.querySelector('.scenario-option[data-answer="0"]');
         option.dispatchEvent(new app.MouseEvent('click', { bubbles: true }));
         const progress = JSON.parse(app.localStorage.getItem('dangote-academy-troubleshooting'));
@@ -831,6 +868,34 @@
         return pumpStarted &&
           app.document.querySelector('[data-plc-output="Q0.0"] b').textContent === 'OFF' &&
           app.document.querySelector('[data-plc-output="Q0.2"] b').textContent === 'OFF';
+      }],
+      ['PLC analog program writes a valve setpoint and explains each scan', () => {
+        const app = testApp();
+        app.selectPlcProgram('analog-level');
+        const analogInput = app.document.querySelector('[data-plc-analog-input="AI0"]');
+        analogInput.value = '20';
+        analogInput.dispatchEvent(new app.Event('change', { bubbles: true }));
+        return app.document.querySelector('[data-plc-output="AQ0"] b').textContent === '65%' &&
+          app.document.querySelector('#plc-explanation').textContent.includes('AI0') &&
+          app.document.querySelector('#plc-explanation').textContent.includes('AQ0');
+      }],
+      ['PLC challenge records passing results and its project snapshot validates', () => {
+        const app = testApp();
+        const key = 'dangote-academy-plc-challenges';
+        const previous = app.localStorage.getItem(key);
+        try {
+          app.localStorage.removeItem(key);
+          app.selectPlcProgram('motor-starter');
+          app.document.querySelector('#plc-challenge').value = 'plc-seal-in';
+          app.document.querySelector('#plc-check-challenge').click();
+          const snapshot = app.projectSnapshot('PLC training export');
+          app.validateProjectWorkspace(snapshot);
+          return app.document.querySelector('#plc-challenge-feedback').textContent.includes('Challenge passed') &&
+            snapshot.plc.model.rungs.length === 2 && snapshot.plc.programId === 'motor-starter';
+        } finally {
+          if (previous === null) app.localStorage.removeItem(key);
+          else app.localStorage.setItem(key, previous);
+        }
       }]
     ];
 

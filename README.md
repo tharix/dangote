@@ -49,7 +49,9 @@ The protected-lamp walkthrough checks each component and connection in sequence 
 
 ## PLC simulator
 
-The PLC Simulator includes editable ladder-logic examples for a seal-in motor starter, an interlocked conveyor, and a tank pump. Toggle simulated digital inputs, edit NO/NC contacts and output coils, add series contacts, parallel branches, and rungs, then execute one scan or a continuous scan loop. The scan model evaluates series as AND and parallel branches as OR, exposes the output image, and plots recent output states. Training faults can force an input on/off or inhibit an output channel. The active program and input states are saved locally on the device.
+The PLC Simulator includes editable ladder-logic examples for a seal-in motor starter, an interlocked conveyor, a tank pump, and analog level control. Toggle simulated digital inputs and scaled 0–100% analog inputs; edit NO/NC contacts, analog comparisons, output coils and setpoints; add series contacts, parallel branches, rungs, TON timers, and CTU counters. Run a single scan or a continuous scan loop to observe the I/O image, timer/counter states, a rung-by-rung scan explanation, and digital output trend. Training faults can force a digital input on/off or inhibit an output channel. Three ladder challenges run defined test sequences against the current program, and three evidence-led troubleshooting cases record attempts and completion offline.
+
+PLC programs are saved on-device and can be exported/imported as JSON. They are also included in named project saves, project revisions and comparisons, project import/export, review submissions, unified engineering reports, and training review exports. PLC challenge and troubleshooting progress appears in the dashboard and learner summary.
 
 This is a browser-based teaching model, not a PLC IDE, target runtime, safety controller, or commissioning tool. Its scan timing and I/O are illustrative only. Never use it to design, test, commission, bypass, or operate real machinery or safety functions.
 

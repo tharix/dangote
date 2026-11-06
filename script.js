@@ -91,6 +91,10 @@ const plcOutputCatalog = [
   { tag: 'Q0.1', label: 'Fault indicator' },
   { tag: 'Q0.2', label: 'Fill valve' }
 ];
+const plcAnalogInputCatalog = [
+  { tag: 'AI0', label: 'Tank level', unit: '%', initial: 20 },
+  { tag: 'AI1', label: 'Flow feedback', unit: '%', initial: 0 }
+];
 const plcPrograms = {
   'motor-starter': {
     title: 'Motor starter · seal-in and overload',
@@ -113,19 +117,70 @@ const plcPrograms = {
       { branches: [[{ tag: 'I0.2', normallyClosed: true }]], coil: 'Q0.1' },
       { branches: [[{ tag: 'Q0.0', normallyClosed: false }]], coil: 'Q0.2' }
     ]
+  },
+  'analog-level': {
+    title: 'Analog level · comparator and valve command',
+    rungs: [
+      { branches: [[{ tag: 'AI0', normallyClosed: false, analogOperator: 'lte', threshold: 30 }]], coil: 'Q0.2', analogOutput: { tag: 'AQ0', value: 65 } },
+      { branches: [[{ tag: 'AI0', normallyClosed: false, analogOperator: 'gte', threshold: 90 }]], coil: 'Q0.1' }
+    ]
   }
 };
+const plcChallenges = [
+  {
+    id: 'plc-seal-in', title: 'Build a seal-in starter', programId: 'motor-starter',
+    objective: 'Start seals the output in; the stop loop or overload must drop it out.',
+    hint: 'Use parallel start and output-hold branches, then place stop-loop and overload contacts in series.',
+    steps: [
+      { inputs: { 'I0.0': true, 'I0.1': true, 'I0.2': true, 'I0.3': true }, outputs: { 'Q0.0': true } },
+      { inputs: { 'I0.0': false, 'I0.1': true, 'I0.2': true, 'I0.3': true }, outputs: { 'Q0.0': true } },
+      { inputs: { 'I0.0': false, 'I0.1': false, 'I0.2': true, 'I0.3': true }, outputs: { 'Q0.0': false } },
+      { inputs: { 'I0.0': true, 'I0.1': true, 'I0.2': false, 'I0.3': true }, outputs: { 'Q0.0': false, 'Q0.1': true } }
+    ]
+  },
+  {
+    id: 'plc-guard-interlock', title: 'Add a guard interlock', programId: 'conveyor',
+    objective: 'The conveyor must stop when the guard opens and signal the guard fault.',
+    hint: 'Put the guard-closed contact in series with both the start path and seal-in path.',
+    steps: [
+      { inputs: { 'I0.0': true, 'I0.1': true, 'I0.3': true, 'I0.4': true }, outputs: { 'Q0.0': true, 'Q0.1': false } },
+      { inputs: { 'I0.0': false, 'I0.1': true, 'I0.3': true, 'I0.4': true }, outputs: { 'Q0.0': true } },
+      { inputs: { 'I0.0': false, 'I0.1': true, 'I0.3': false, 'I0.4': true }, outputs: { 'Q0.0': false, 'Q0.1': true } }
+    ]
+  },
+  {
+    id: 'plc-analog-control', title: 'Create an analog level response', programId: 'analog-level',
+    objective: 'Enable the valve command below 30% level and raise a high-level alarm at 90%.',
+    hint: 'Set the analog contact comparison and assign the analog output value on its rung.',
+    steps: [
+      { inputs: {}, analogInputs: { AI0: 20 }, outputs: { 'Q0.2': true }, analogOutputs: { AQ0: 65 } },
+      { inputs: {}, analogInputs: { AI0: 60 }, outputs: { 'Q0.2': false }, analogOutputs: { AQ0: 0 } },
+      { inputs: {}, analogInputs: { AI0: 95 }, outputs: { 'Q0.1': true } }
+    ]
+  }
+];
+const plcTroubleshootingCases = [
+  { id: 'plc-stop-loop', title: 'Starter drops out immediately', symptom: 'Start input is visible, but the motor output drops on the next scan.', options: ['Check the stop-loop healthy input and its series contact in both start and seal paths', 'Increase the timer preset', 'Force the output coil on'], answer: 0, rationale: 'A healthy stop loop is commonly represented by an energized input and a normally-open logical contact; loss of that permissive breaks both paths.' },
+  { id: 'plc-guard', title: 'Conveyor will not restart', symptom: 'The guard appears closed, but the PLC input image remains OFF.', options: ['Compare the field signal indication with the input image and verify the interlock path in the program', 'Bridge the guard switch input', 'Disable the guard fault rung'], answer: 0, rationale: 'Compare the simulated field input, input image, and rung state. Never bypass a real guard or safety circuit.' },
+  { id: 'plc-analog', title: 'Valve command stays at zero', symptom: 'Tank level is below the demand threshold, but the analog output remains at 0%.', options: ['Check AI scaling/range, comparator direction and threshold, rung power flow, and AQ assignment', 'Raise the high-level alarm threshold', 'Force the valve output on'], answer: 0, rationale: 'Trace the scaled analog input, comparison, rung, and output assignment in sequence.' }
+];
 const plcStorageKey = 'dangote-academy-plc';
+const plcChallengeStorageKey = 'dangote-academy-plc-challenges';
+const plcTroubleshootingStorageKey = 'dangote-academy-plc-troubleshooting';
 let plcProgramId = 'motor-starter';
 let plcModel = null;
 let plcInputs = Object.fromEntries(plcInputCatalog.map(input => [input.tag, input.initial]));
 let plcOutputs = Object.fromEntries(plcOutputCatalog.map(output => [output.tag, false]));
+let plcAnalogInputs = Object.fromEntries(plcAnalogInputCatalog.map(input => [input.tag, input.initial]));
+let plcAnalogOutputs = { AQ0: 0 };
+let plcRuntimeState = { timers: {}, counters: {} };
 let plcRungStates = [];
 let plcScanCount = 0;
 let plcScanTimer = null;
 let plcTrendSamples = [];
 let plcFault = 'none';
 let plcFaultTarget = 'I0.2';
+let plcLastExplanations = [];
 
 const troubleshootingScenarios = [
   { title: 'Motor starter will not run', symptom: 'The supply is present, but the contactor does not pull in when the start button is pressed.', options: ['Check the control fuse and overload contact', 'Replace the motor bearings', 'Increase the motor cable size'], answer: 0 },
@@ -329,6 +384,7 @@ function showToast(message) {
 }
 
 function switchModule(moduleId) {
+  if (moduleId !== 'plc-lab') stopPlcScans();
   $$('.nav-item').forEach(item => item.classList.toggle('active', item.dataset.module === moduleId));
   $$('.module').forEach(module => module.classList.toggle('active', module.id === `module-${moduleId}`));
   $('#module-title').textContent = moduleTitles[moduleId] || moduleTitles.dashboard;
@@ -596,11 +652,31 @@ function getElectronicsDiagnosticsProgress() {
   }
 }
 
+function getPlcChallengeProgress() {
+  try {
+    const progress = JSON.parse(localStorage.getItem(plcChallengeStorageKey) || '{}');
+    return progress && typeof progress === 'object' && !Array.isArray(progress) ? progress : {};
+  } catch {
+    return {};
+  }
+}
+
+function getPlcTroubleshootingProgress() {
+  try {
+    const progress = JSON.parse(localStorage.getItem(plcTroubleshootingStorageKey) || '{}');
+    return progress && typeof progress === 'object' && !Array.isArray(progress) ? progress : {};
+  } catch {
+    return {};
+  }
+}
+
 function getStudentProgressSummary() {
   const lessons = getLessonProgress();
   const troubleshooting = getTroubleshootingProgress();
   const stationDiagnostics = getStationDiagnosticsProgress();
   const electronicsDiagnostics = getElectronicsDiagnosticsProgress();
+  const plcChallengesProgress = getPlcChallengeProgress();
+  const plcDiagnosticsProgress = getPlcTroubleshootingProgress();
   const projects = getSavedProjects();
   return {
     lessonsCompleted: guidedLessons.filter(lesson => lessons[lesson.id]).length,
@@ -614,6 +690,12 @@ function getStudentProgressSummary() {
     electronicsScenariosCompleted: electronicsDiagnosticScenarios.filter(scenario => electronicsDiagnostics[scenario.id]?.completed).length,
     electronicsScenariosTotal: electronicsDiagnosticScenarios.length,
     electronicsAttempts: electronicsDiagnosticScenarios.reduce((total, scenario) => total + (Number(electronicsDiagnostics[scenario.id]?.attempts) || 0), 0),
+    plcChallengesCompleted: plcChallenges.filter(challenge => plcChallengesProgress[challenge.id]?.completed).length,
+    plcChallengesTotal: plcChallenges.length,
+    plcChallengesAttempts: plcChallenges.reduce((total, challenge) => total + (Number(plcChallengesProgress[challenge.id]?.attempts) || 0), 0),
+    plcScenariosCompleted: plcTroubleshootingCases.filter(scenario => plcDiagnosticsProgress[scenario.id]?.completed).length,
+    plcScenariosTotal: plcTroubleshootingCases.length,
+    plcScenarioAttempts: plcTroubleshootingCases.reduce((total, scenario) => total + (Number(plcDiagnosticsProgress[scenario.id]?.attempts) || 0), 0),
     projectsSubmitted: projects.filter(project => ['submitted', 'approved', 'changes-requested'].includes(project.status)).length,
     projectsApproved: projects.filter(project => project.status === 'approved').length
   };
@@ -640,6 +722,7 @@ function renderDashboard() {
   const troubleshooting = getTroubleshootingProgress();
   const stationDiagnostics = getStationDiagnosticsProgress();
   const electronicsDiagnostics = getElectronicsDiagnosticsProgress();
+  const plcChallengeProgress = getPlcChallengeProgress();
   const completedLessons = guidedLessons.filter(lesson => lessons[lesson.id]).length;
   const completedScenarios = troubleshootingScenarios.filter((scenario, index) =>
     troubleshooting[scenario.id || `scenario-${index}`]?.completed
@@ -653,6 +736,8 @@ function renderDashboard() {
   ).length;
   $('#dashboard-station-count').textContent = `Power-station cases ${completedStationCases} / ${stationDiagnosticScenarios.length}`;
   $('#dashboard-electronics-count').textContent = `Electronics cases ${electronicsDiagnosticScenarios.filter(scenario => electronicsDiagnostics[scenario.id]?.completed).length} / ${electronicsDiagnosticScenarios.length}`;
+  const plcCompleted = plcChallenges.filter(challenge => plcChallengeProgress[challenge.id]?.completed).length;
+  $('#dashboard-plc-count').textContent = `PLC challenges ${plcCompleted} / ${plcChallenges.length}`;
   $('#dashboard-boq-count').textContent = String($$('#boq-body tr').length);
 
   const events = projects
@@ -712,6 +797,19 @@ function renderDashboard() {
       });
     }
   });
+  const plcProgress = getPlcChallengeProgress();
+  plcChallenges.forEach(challenge => {
+    const completed = plcProgress[challenge.id];
+    if (completed?.completed && Number.isFinite(Date.parse(completed.completedAt))) {
+      events.push({
+        title: `PLC challenge passed: ${challenge.title}`,
+        detail: `PLC training · ${Number(completed.attempts) || 0} attempt${Number(completed.attempts) === 1 ? '' : 's'}`,
+        at: completed.completedAt,
+        icon: 'fa-microchip',
+        color: 'violet-bg'
+      });
+    }
+  });
 
   events.sort((left, right) => Date.parse(right.at) - Date.parse(left.at));
   activity.innerHTML = events.length
@@ -722,7 +820,7 @@ function renderDashboard() {
 function renderStudentProgressSummary() {
   const summary = getStudentProgressSummary();
   const target = $('#student-progress-summary');
-  if (target) target.innerHTML = `<span>Lessons <b>${summary.lessonsCompleted}/${summary.lessonsTotal}</b></span><span>Building scenarios <b>${summary.scenariosCompleted}/${summary.scenariosTotal}</b></span><span>Power-station cases <b>${summary.stationScenariosCompleted}/${summary.stationScenariosTotal}</b></span><span>Electronics cases <b>${summary.electronicsScenariosCompleted}/${summary.electronicsScenariosTotal}</b></span><span>Attempts <b>${summary.attempts + summary.stationAttempts + summary.electronicsAttempts}</b></span><span>Submitted <b>${summary.projectsSubmitted}</b></span>`;
+  if (target) target.innerHTML = `<span>Lessons <b>${summary.lessonsCompleted}/${summary.lessonsTotal}</b></span><span>Building scenarios <b>${summary.scenariosCompleted}/${summary.scenariosTotal}</b></span><span>Power-station cases <b>${summary.stationScenariosCompleted}/${summary.stationScenariosTotal}</b></span><span>Electronics cases <b>${summary.electronicsScenariosCompleted}/${summary.electronicsScenariosTotal}</b></span><span>PLC challenges <b>${summary.plcChallengesCompleted}/${summary.plcChallengesTotal}</b></span><span>PLC cases <b>${summary.plcScenariosCompleted}/${summary.plcScenariosTotal}</b></span><span>Attempts <b>${summary.attempts + summary.stationAttempts + summary.electronicsAttempts + summary.plcChallengesAttempts + summary.plcScenarioAttempts}</b></span><span>Submitted <b>${summary.projectsSubmitted}</b></span>`;
   renderDashboard();
 }
 
@@ -773,7 +871,10 @@ function renderReview() {
   $('#review-projects').innerHTML = projects.length ? projects.map(project => {
     const history = Array.isArray(project.reviewHistory) ? project.reviewHistory : [];
     const status = normalizeProjectStatus(project.status, 'draft');
-    return `<article class="review-card" data-project="${escapeHtml(project.name)}"><div><strong>${escapeHtml(project.name)}</strong><small>Owner: ${escapeHtml(project.owner?.name || 'Local learner')} · Saved ${escapeHtml(new Date(project.savedAt).toLocaleString())}</small><span class="status ${status === 'approved' ? 'success' : status === 'changes-requested' ? 'danger' : status === 'submitted' ? 'info' : 'info'}">${escapeHtml(status)}</span><small>${project.resubmissionCount || 0} resubmission${project.resubmissionCount === 1 ? '' : 's'} · ${history.length} review event${history.length === 1 ? '' : 's'}</small>${project.comments ? `<p class="review-comment"><strong>Latest feedback:</strong> ${escapeHtml(project.comments)}</p>` : ''}<details><summary>Review history</summary><ul>${history.length ? history.map(event => `<li>${escapeHtml(event.action)} · ${escapeHtml(event.actor || 'Unknown')} · ${escapeHtml(new Date(event.at).toLocaleString())}${event.comment ? ` — ${escapeHtml(event.comment)}` : ''}</li>`).join('') : '<li>No history yet.</li>'}</ul></details></div><div class="review-actions"><textarea class="review-comment-input" data-role="instructor,administrator" data-name="${escapeHtml(project.name)}" maxlength="500" placeholder="Comment for the student" ${status !== 'submitted' ? 'disabled' : ''}>${escapeHtml(project.comments || '')}</textarea><div class="button-row" data-role="instructor,administrator"><button class="secondary-button review-action" data-name="${escapeHtml(project.name)}" data-status="approved" ${status !== 'submitted' ? 'disabled' : ''}>Approve</button><button class="secondary-button review-action" data-name="${escapeHtml(project.name)}" data-status="changes-requested" ${status !== 'submitted' ? 'disabled' : ''}>Request changes</button></div></div></article>`;
+    const plcSummary = project.plc
+      ? `<small>PLC: ${escapeHtml(plcPrograms[project.plc.programId]?.title || 'Saved ladder')} · ${project.plc.model.rungs.length} rung${project.plc.model.rungs.length === 1 ? '' : 's'}</small>`
+      : '';
+    return `<article class="review-card" data-project="${escapeHtml(project.name)}"><div><strong>${escapeHtml(project.name)}</strong><small>Owner: ${escapeHtml(project.owner?.name || 'Local learner')} · Saved ${escapeHtml(new Date(project.savedAt).toLocaleString())}</small>${plcSummary}<span class="status ${status === 'approved' ? 'success' : status === 'changes-requested' ? 'danger' : status === 'submitted' ? 'info' : 'info'}">${escapeHtml(status)}</span><small>${project.resubmissionCount || 0} resubmission${project.resubmissionCount === 1 ? '' : 's'} · ${history.length} review event${history.length === 1 ? '' : 's'}</small>${project.comments ? `<p class="review-comment"><strong>Latest feedback:</strong> ${escapeHtml(project.comments)}</p>` : ''}<details><summary>Review history</summary><ul>${history.length ? history.map(event => `<li>${escapeHtml(event.action)} · ${escapeHtml(event.actor || 'Unknown')} · ${escapeHtml(new Date(event.at).toLocaleString())}${event.comment ? ` — ${escapeHtml(event.comment)}` : ''}</li>`).join('') : '<li>No history yet.</li>'}</ul></details></div><div class="review-actions"><textarea class="review-comment-input" data-role="instructor,administrator" data-name="${escapeHtml(project.name)}" maxlength="500" placeholder="Comment for the student" ${status !== 'submitted' ? 'disabled' : ''}>${escapeHtml(project.comments || '')}</textarea><div class="button-row" data-role="instructor,administrator"><button class="secondary-button review-action" data-name="${escapeHtml(project.name)}" data-status="approved" ${status !== 'submitted' ? 'disabled' : ''}>Approve</button><button class="secondary-button review-action" data-name="${escapeHtml(project.name)}" data-status="changes-requested" ${status !== 'submitted' ? 'disabled' : ''}>Request changes</button></div></div></article>`;
   }).join('') : '<div class="review-empty-state" data-role="instructor,administrator"><p class="muted">Save a project to review it here.</p></div>';
   applyRoleControls();
   renderStudentProgressSummary();
@@ -1441,6 +1542,85 @@ function getSavedProjects() {
   }
 }
 
+function getPlcSnapshot() {
+  return JSON.parse(JSON.stringify({
+    schemaVersion: 1,
+    programId: plcProgramId,
+    model: plcModel || clonePlcProgram(plcPrograms[plcProgramId]),
+    inputs: plcInputs,
+    outputs: plcOutputs,
+    analogInputs: plcAnalogInputs,
+    analogOutputs: plcAnalogOutputs,
+    runtimeState: plcRuntimeState,
+    scanCount: plcScanCount
+  }));
+}
+
+function validatePlcSnapshot(snapshot) {
+  const rungs = Array.isArray(snapshot?.model?.rungs) ? snapshot.model.rungs : [];
+  const timerPresets = Object.fromEntries(rungs.filter(rung => rung?.timer)
+    .map(rung => [rung.timer.tag, rung.timer.presetScans]));
+  const counterPresets = Object.fromEntries(rungs.filter(rung => rung?.counter)
+    .map(rung => [rung.counter.tag, rung.counter.preset]));
+  const runtimeState = snapshot?.runtimeState || { timers: {}, counters: {} };
+  if (!snapshot || snapshot.schemaVersion !== 1 ||
+    !Object.prototype.hasOwnProperty.call(plcPrograms, snapshot.programId) ||
+    !window.DangoteAcademyCore.validatePlcProgram(snapshot.model).valid ||
+    !snapshot.inputs || typeof snapshot.inputs !== 'object' || Array.isArray(snapshot.inputs) ||
+    Object.keys(snapshot.inputs).some(tag => !plcInputCatalog.some(input => input.tag === tag)) ||
+    Object.values(snapshot.inputs).some(value => typeof value !== 'boolean') ||
+    !snapshot.outputs || typeof snapshot.outputs !== 'object' || Array.isArray(snapshot.outputs) ||
+    Object.keys(snapshot.outputs).some(tag => !plcOutputCatalog.some(output => output.tag === tag)) ||
+    Object.values(snapshot.outputs).some(value => typeof value !== 'boolean') ||
+    !snapshot.analogInputs || typeof snapshot.analogInputs !== 'object' || Array.isArray(snapshot.analogInputs) ||
+    Object.entries(snapshot.analogInputs).some(([tag, value]) =>
+      !plcAnalogInputCatalog.some(input => input.tag === tag) || !Number.isFinite(value) || value < 0 || value > 100) ||
+    !snapshot.analogOutputs || typeof snapshot.analogOutputs !== 'object' || Array.isArray(snapshot.analogOutputs) ||
+    Object.entries(snapshot.analogOutputs).some(([tag, value]) =>
+      tag !== 'AQ0' || !Number.isFinite(value) || value < 0 || value > 100) ||
+    !runtimeState.timers || typeof runtimeState.timers !== 'object' || Array.isArray(runtimeState.timers) ||
+    Object.entries(runtimeState.timers).some(([tag, state]) =>
+      !Object.prototype.hasOwnProperty.call(timerPresets, tag) || !state ||
+      !Number.isInteger(state.elapsedScans) || state.elapsedScans < 0 ||
+      state.elapsedScans > timerPresets[tag] || typeof state.done !== 'boolean' ||
+      state.done !== (state.elapsedScans >= timerPresets[tag])) ||
+    !runtimeState.counters || typeof runtimeState.counters !== 'object' || Array.isArray(runtimeState.counters) ||
+    Object.entries(runtimeState.counters).some(([tag, state]) =>
+      !Object.prototype.hasOwnProperty.call(counterPresets, tag) || !state ||
+      !Number.isInteger(state.count) || state.count < 0 || state.count > counterPresets[tag] ||
+      typeof state.previousRung !== 'boolean') ||
+    !Number.isInteger(snapshot.scanCount) || snapshot.scanCount < 0) {
+    throw new Error('Invalid PLC workspace.');
+  }
+  const stateCheck = window.DangoteAcademyCore.calculatePlcScan(
+    snapshot.model, snapshot.inputs, snapshot.outputs, runtimeState,
+    snapshot.analogInputs
+  );
+  if (!stateCheck.valid) throw new Error(stateCheck.error);
+}
+
+function restorePlcSnapshot(snapshot) {
+  validatePlcSnapshot(snapshot);
+  stopPlcScans();
+  plcProgramId = snapshot.programId;
+  plcModel = clonePlcProgram(snapshot.model);
+  plcInputs = Object.fromEntries(plcInputCatalog.map(input =>
+    [input.tag, snapshot.inputs[input.tag] ?? input.initial]));
+  plcOutputs = Object.fromEntries(plcOutputCatalog.map(output =>
+    [output.tag, snapshot.outputs[output.tag] === true]));
+  plcAnalogInputs = Object.fromEntries(plcAnalogInputCatalog.map(input =>
+    [input.tag, Number.isFinite(snapshot.analogInputs[input.tag]) ? snapshot.analogInputs[input.tag] : input.initial]));
+  plcAnalogOutputs = { AQ0: Number.isFinite(snapshot.analogOutputs.AQ0) ? snapshot.analogOutputs.AQ0 : 0 };
+  plcRuntimeState = clonePlcProgram(snapshot.runtimeState || { timers: {}, counters: {} });
+  plcScanCount = snapshot.scanCount;
+  plcRungStates = [];
+  plcTrendSamples = [];
+  plcFault = 'none';
+  $('#plc-fault').value = 'none';
+  renderPlcWorkspace();
+  savePlcState();
+}
+
 function openProjectDatabase() {
     return new Promise((resolve, reject) => {
       if (!window.indexedDB) {
@@ -1509,6 +1689,7 @@ function projectSnapshot(name) {
       savedAt: new Date().toISOString(),
       rows: getBOQRows(),
       circuit: serialiseCircuit(),
+      plc: getPlcSnapshot(),
       schedule: getLoadScheduleSnapshot(),
       calculationInputs: getLoadSizingInputs(),
       motorDesignInputs: getMotorDesignInputs(),
@@ -1535,6 +1716,7 @@ function validateProjectWorkspace(project) {
     throw new Error('Invalid project BOQ.');
   }
   validateCircuitData(project.circuit);
+  if (project.plc) validatePlcSnapshot(project.plc);
   if (project.schedule && !isValidLoadScheduleSnapshot(project.schedule)) {
     throw new Error('Invalid project load schedule.');
   }
@@ -1575,7 +1757,8 @@ function saveNamedProject() {
     JSON.stringify(previous.schedule || null) !== JSON.stringify(project.schedule) ||
     JSON.stringify(previous.calculationInputs || null) !== JSON.stringify(project.calculationInputs) ||
     JSON.stringify(previous.motorDesignInputs || null) !== JSON.stringify(project.motorDesignInputs) ||
-    JSON.stringify(previous.commissioning || getDefaultCommissioningSnapshot()) !== JSON.stringify(project.commissioning)
+    JSON.stringify(previous.commissioning || getDefaultCommissioningSnapshot()) !== JSON.stringify(project.commissioning) ||
+    JSON.stringify(previous.plc || null) !== JSON.stringify(project.plc)
   ));
   project.status = changed && ['submitted', 'approved'].includes(previous?.status)
     ? 'draft'
@@ -1591,6 +1774,7 @@ function saveNamedProject() {
       savedAt: previous.savedAt || project.savedAt,
       rows: previous.rows || [],
       circuit: previous.circuit || { version: 2, components: [], connections: [] },
+      plc: previous.plc || null,
       schedule: previous.schedule || null,
       calculationInputs: previous.calculationInputs || null,
       motorDesignInputs: previous.motorDesignInputs || null,
@@ -1659,13 +1843,14 @@ function compareProjectRevisions() {
     calculationChanged: JSON.stringify(project.calculationInputs || null) !== JSON.stringify(target.calculationInputs || null),
     motorDesignChanged: JSON.stringify(project.motorDesignInputs || null) !== JSON.stringify(target.motorDesignInputs || null),
     commissioningChanged: JSON.stringify(project.commissioning || getDefaultCommissioningSnapshot()) !== JSON.stringify(target.commissioning || getDefaultCommissioningSnapshot()),
+    plcChanged: JSON.stringify(project.plc || null) !== JSON.stringify(target.plc || null),
     reviewStatusChanged: (project.status || 'draft') !== (target.status || 'draft'),
     boqItems: `${targetRows.length} → ${currentRows.length}`,
     components: `${targetComponents.length} → ${currentComponents.length}`,
     connections: `${targetConnections.length} → ${currentConnections.length}`,
     loads: `${target.schedule?.rows?.length || 0} → ${project.schedule?.rows?.length || 0}`
   };
-  output.textContent = `Revision ${index + 1}: ${result.boqChanged ? 'BOQ changed' : 'BOQ unchanged'} · ${result.circuitChanged ? 'Circuit changed' : 'Circuit unchanged'} · ${result.scheduleChanged ? 'Load schedule changed' : 'Load schedule unchanged'} · ${result.calculationChanged ? 'Sizing inputs changed' : 'Sizing inputs unchanged'} · ${result.motorDesignChanged ? 'Motor design changed' : 'Motor design unchanged'} · ${result.commissioningChanged ? 'Installation record changed' : 'Installation record unchanged'} · review status ${result.reviewStatusChanged ? 'changed' : 'unchanged'} · items ${result.boqItems} · components ${result.components} · connections ${result.connections} · schedule rows ${result.loads}`;
+  output.textContent = `Revision ${index + 1}: ${result.boqChanged ? 'BOQ changed' : 'BOQ unchanged'} · ${result.circuitChanged ? 'Circuit changed' : 'Circuit unchanged'} · ${result.plcChanged ? 'PLC program changed' : 'PLC program unchanged'} · ${result.scheduleChanged ? 'Load schedule changed' : 'Load schedule unchanged'} · ${result.calculationChanged ? 'Sizing inputs changed' : 'Sizing inputs unchanged'} · ${result.motorDesignChanged ? 'Motor design changed' : 'Motor design unchanged'} · ${result.commissioningChanged ? 'Installation record changed' : 'Installation record unchanged'} · review status ${result.reviewStatusChanged ? 'changed' : 'unchanged'} · items ${result.boqItems} · components ${result.components} · connections ${result.connections} · schedule rows ${result.loads}`;
   return result;
 }
 
@@ -1701,6 +1886,7 @@ function restoreProjectRevision() {
   if (revision.motorDesignInputs) restoreMotorDesignInputs(revision.motorDesignInputs);
   else calculateMotorFeeder();
   restoreCommissioningChecks(revision.commissioning || getDefaultCommissioningSnapshot());
+  if (revision.plc) restorePlcSnapshot(revision.plc);
   showToast(`Revision ${index + 1} restored to the workspace. Save the project to keep it.`);
 }
 
@@ -1729,6 +1915,7 @@ function loadNamedProject() {
   if (project.motorDesignInputs) restoreMotorDesignInputs(project.motorDesignInputs);
   else calculateMotorFeeder();
   restoreCommissioningChecks(project.commissioning || getDefaultCommissioningSnapshot());
+  if (project.plc) restorePlcSnapshot(project.plc);
   showToast(`Project loaded: ${project.name}`);
 }
 
@@ -1756,7 +1943,16 @@ function deleteNamedProject() {
 
 function exportProject() {
   const name = $('#project-name').value.trim() || 'Electrical Academy Project';
-  const blob = new Blob([JSON.stringify(projectSnapshot(name), null, 2)], { type: 'application/json' });
+  const project = projectSnapshot(name);
+  const saved = getSavedProjects().find(item => item.name === name);
+  if (saved) {
+    project.status = saved.status || 'draft';
+    project.comments = saved.comments || '';
+    project.reviewHistory = saved.reviewHistory || [];
+    project.revisions = saved.revisions || [];
+    project.resubmissionCount = saved.resubmissionCount || 0;
+  }
+  const blob = new Blob([JSON.stringify(project, null, 2)], { type: 'application/json' });
   const link = document.createElement('a');
   link.href = URL.createObjectURL(blob);
   link.download = `${name.replace(/[^a-z0-9]+/gi, '-').toLowerCase() || 'project'}.json`;
@@ -1790,6 +1986,7 @@ function buildEngineeringReport() {
       boq: getBOQRows(),
       total: $('#boq-total')?.textContent || '0.00',
       circuit: serialiseCircuit(),
+      plc: getPlcSnapshot(),
       scheduleInputs: getLoadScheduleSnapshot(),
       circuitValidation: {
         valid: circuitValid,
@@ -1816,6 +2013,8 @@ function buildEngineeringReport() {
       troubleshooting: getTroubleshootingProgress(),
       stationDiagnostics: getStationDiagnosticsProgress(),
       electronicsDiagnostics: getElectronicsDiagnosticsProgress(),
+      plcChallenges: getPlcChallengeProgress(),
+      plcTroubleshooting: getPlcTroubleshootingProgress(),
       progress
     }
   };
@@ -2737,6 +2936,9 @@ function exportReview() {
     troubleshootingScore: Number($('#troubleshooting-score').textContent),
     stationDiagnostics: getStationDiagnosticsProgress(),
     electronicsDiagnostics: getElectronicsDiagnosticsProgress(),
+    plc: getPlcSnapshot(),
+    plcChallenges: getPlcChallengeProgress(),
+    plcTroubleshooting: getPlcTroubleshootingProgress(),
     project: $('#project-name')?.value || '',
     circuit: serialiseCircuit()
   };
@@ -2811,11 +3013,7 @@ function stopPlcScans() {
 }
 
 function savePlcState() {
-  localStorage.setItem(plcStorageKey, JSON.stringify({
-    programId: plcProgramId,
-    model: plcModel,
-    inputs: plcInputs
-  }));
+  localStorage.setItem(plcStorageKey, JSON.stringify(getPlcSnapshot()));
 }
 
 function restorePlcState() {
@@ -2826,6 +3024,10 @@ function restorePlcState() {
     if (!Object.prototype.hasOwnProperty.call(plcPrograms, saved.programId) ||
       !window.DangoteAcademyCore.validatePlcProgram(saved.model).valid) {
       $('#plc-status-text').textContent = 'Saved PLC program is invalid; the default example is loaded.';
+      return;
+    }
+    if (saved.schemaVersion === 1) {
+      restorePlcSnapshot(saved);
       return;
     }
     plcProgramId = saved.programId;
@@ -2848,12 +3050,23 @@ function renderPlcInputs() {
   }).join('');
 }
 
+function renderPlcWatchTable() {
+  const container = $('#plc-watch-table');
+  const inputs = plcAnalogInputCatalog.map(input => `
+    <tr><th scope="row"><code>${input.tag}</code></th><td>${escapeHtml(input.label)}</td>
+    <td><input type="range" min="0" max="100" step="1" value="${plcAnalogInputs[input.tag]}" data-plc-analog-input="${input.tag}" aria-label="${escapeHtml(input.label)} from 0 to 100 percent"></td>
+    <td><output>${plcAnalogInputs[input.tag]} ${input.unit}</output></td></tr>`).join('');
+  container.innerHTML = `<div class="table-scroll"><table><thead><tr><th>Tag</th><th>Point</th><th>Simulated value</th><th>Value</th></tr></thead><tbody>${inputs}<tr><th scope="row"><code>AQ0</code></th><td>Control valve command</td><td><span class="plc-watch-meter"><i style="width:${plcAnalogOutputs.AQ0}%"></i></span></td><td><output>${plcAnalogOutputs.AQ0} %</output></td></tr></tbody></table></div>`;
+}
+
 function renderPlcOutputs() {
-  $('#plc-outputs').innerHTML = plcOutputCatalog.map(output => {
+  const digital = plcOutputCatalog.map(output => {
     const inhibited = plcFault === 'output-inhibit' && plcFaultTarget === output.tag;
     const on = plcOutputs[output.tag] && !inhibited;
     return `<div class="plc-io-point plc-output-point ${on ? 'is-on' : ''}" data-plc-output="${output.tag}"><code>${output.tag}</code><span>${escapeHtml(output.label)}</span><b>${on ? 'ON' : 'OFF'}${inhibited ? ' · INHIBITED' : ''}</b></div>`;
   }).join('');
+  const analog = `<div class="plc-io-point plc-output-point ${plcAnalogOutputs.AQ0 > 0 ? 'is-on' : ''}" data-plc-output="AQ0"><code>AQ0</code><span>Control valve command</span><b>${plcAnalogOutputs.AQ0}%</b></div>`;
+  $('#plc-outputs').innerHTML = digital + analog;
 }
 
 function renderPlcFaultTargets() {
@@ -2867,7 +3080,16 @@ function renderPlcFaultTargets() {
 }
 
 function renderPlcLadder() {
-  const contactTagOptions = [...plcInputCatalog, ...plcOutputCatalog];
+  const timerContacts = plcModel.rungs.filter(rung => rung.timer).map(rung => ({
+    tag: `${rung.timer.tag}.DN`, label: `${rung.timer.tag} done`
+  }));
+  const counterContacts = plcModel.rungs.filter(rung => rung.counter).map(rung => ({
+    tag: `${rung.counter.tag}.DN`, label: `${rung.counter.tag} done`
+  }));
+  const contactTagOptions = [
+    ...plcInputCatalog, ...plcOutputCatalog, ...plcAnalogInputCatalog,
+    ...timerContacts, ...counterContacts
+  ];
   const outputOptions = plcOutputCatalog;
   $('#plc-ladder').innerHTML = plcModel.rungs.map((rung, rungIndex) => {
     const state = plcRungStates[rungIndex];
@@ -2876,20 +3098,56 @@ function renderPlcLadder() {
       <div class="plc-contact-list">${branch.map((contact, contactIndex) => `<label class="plc-contact-editor ${state?.branches[branchIndex] ? 'is-true' : ''}">
         <select data-plc-contact-tag data-rung="${rungIndex}" data-branch="${branchIndex}" data-contact="${contactIndex}" aria-label="Rung ${rungIndex + 1} contact ${contactIndex + 1} tag">${contactTagOptions.map(item => `<option value="${item.tag}" ${contact.tag === item.tag ? 'selected' : ''}>${item.tag}</option>`).join('')}</select>
         <select data-plc-contact-type data-rung="${rungIndex}" data-branch="${branchIndex}" data-contact="${contactIndex}" aria-label="Rung ${rungIndex + 1} contact ${contactIndex + 1} type"><option value="no" ${contact.normallyClosed ? '' : 'selected'}>Normally open</option><option value="nc" ${contact.normallyClosed ? 'selected' : ''}>Normally closed</option></select>
+        <span class="plc-analog-compare" ${contact.tag.startsWith('AI') ? '' : 'hidden'}>
+          <select data-plc-analog-operator data-rung="${rungIndex}" data-branch="${branchIndex}" data-contact="${contactIndex}" aria-label="Analog compare operator"><option value="gte" ${contact.analogOperator === 'gte' ? 'selected' : ''}>&ge;</option><option value="lte" ${contact.analogOperator === 'lte' ? 'selected' : ''}>&le;</option></select>
+          <input type="number" min="0" max="100" step="1" value="${Number.isFinite(contact.threshold) ? contact.threshold : 50}" data-plc-analog-threshold data-rung="${rungIndex}" data-branch="${branchIndex}" data-contact="${contactIndex}" aria-label="Analog compare threshold percent">
+        </span>
         <button type="button" class="plc-remove-contact" data-plc-remove-contact data-rung="${rungIndex}" data-branch="${branchIndex}" data-contact="${contactIndex}" aria-label="Remove ${contact.tag} contact">×</button>
       </label>`).join('')}</div>
       <button type="button" class="plc-editor-action" data-plc-add-series data-rung="${rungIndex}" data-branch="${branchIndex}">+ Series</button>
     </div>`).join('');
+    const instruction = rung.timer
+      ? `<div class="plc-instruction ${state?.instruction?.done ? 'is-true' : ''}"><strong>TON ${rung.timer.tag}</strong><label>Preset scans<input type="number" min="1" max="120" step="1" value="${rung.timer.presetScans}" data-plc-timer-preset data-rung="${rungIndex}" aria-label="Timer preset scans"></label><span>${state?.instruction?.elapsedScans || 0}/${rung.timer.presetScans} scans · ${state?.instruction?.done ? 'DONE' : 'timing'}</span><button type="button" class="plc-editor-action danger" data-plc-remove-instruction data-rung="${rungIndex}">Remove</button></div>`
+      : rung.counter
+        ? `<div class="plc-instruction ${state?.instruction?.done ? 'is-true' : ''}"><strong>CTU ${rung.counter.tag}</strong><label>Preset<input type="number" min="1" max="999" step="1" value="${rung.counter.preset}" data-plc-counter-preset data-rung="${rungIndex}" aria-label="Counter preset"></label><label>Reset input<select data-plc-counter-reset data-rung="${rungIndex}" aria-label="Counter reset input">${plcInputCatalog.map(input => `<option value="${input.tag}" ${rung.counter.resetTag === input.tag ? 'selected' : ''}>${input.tag}</option>`).join('')}</select></label><span>${state?.instruction?.count || 0}/${rung.counter.preset} · ${state?.instruction?.done ? 'DONE' : 'counting'}</span><button type="button" class="plc-editor-action danger" data-plc-remove-instruction data-rung="${rungIndex}">Remove</button></div>`
+        : '';
+    const analogOutput = `<div class="plc-analog-output"><label>Analog output<select data-plc-analog-output data-rung="${rungIndex}" aria-label="Rung ${rungIndex + 1} analog output"><option value="" ${rung.analogOutput ? '' : 'selected'}>None</option><option value="AQ0" ${rung.analogOutput?.tag === 'AQ0' ? 'selected' : ''}>AQ0 · valve</option></select></label>${rung.analogOutput ? `<label>Setpoint %<input type="number" min="0" max="100" step="1" value="${rung.analogOutput.value}" data-plc-analog-setpoint data-rung="${rungIndex}" aria-label="Analog output setpoint percentage"></label>` : ''}</div>`;
     return `<div class="plc-rung ${state?.energised ? 'is-true' : ''}">
       <span class="plc-rung-number">Rung ${rungIndex + 1}</span>
       <div class="plc-rail" aria-hidden="true"></div>
       <div class="plc-branches">${branches}</div>
       <div class="plc-coil-editor"><span>Coil</span><select data-plc-coil data-rung="${rungIndex}" aria-label="Rung ${rungIndex + 1} output coil">${outputOptions.map(item => `<option value="${item.tag}" ${rung.coil === item.tag ? 'selected' : ''}>${item.tag} · ${escapeHtml(item.label)}</option>`).join('')}</select><b>${state?.energised ? 'ENERGIZED' : 'DE-ENERGIZED'}</b></div>
       <div class="plc-rail plc-rail-right" aria-hidden="true"></div>
-      <div class="plc-rung-actions"><button type="button" class="plc-editor-action" data-plc-add-branch data-rung="${rungIndex}">+ Parallel branch</button><button type="button" class="plc-editor-action danger" data-plc-remove-rung data-rung="${rungIndex}">Remove rung</button></div>
+      <div class="plc-rung-actions"><button type="button" class="plc-editor-action" data-plc-add-branch data-rung="${rungIndex}">+ Parallel branch</button><button type="button" class="plc-editor-action" data-plc-add-instruction="timer" data-rung="${rungIndex}" ${rung.timer || rung.counter ? 'disabled' : ''}>+ TON</button><button type="button" class="plc-editor-action" data-plc-add-instruction="counter" data-rung="${rungIndex}" ${rung.timer || rung.counter ? 'disabled' : ''}>+ CTU</button>${instruction}${analogOutput}<button type="button" class="plc-editor-action danger" data-plc-remove-rung data-rung="${rungIndex}">Remove rung</button></div>
     </div>`;
   }).join('');
   $('#plc-add-rung').disabled = plcModel.rungs.length >= 8;
+}
+
+function renderPlcExplanation() {
+  const container = $('#plc-explanation');
+  if (!plcLastExplanations.length) {
+    container.innerHTML = '<p class="plot-placeholder">Run a scan to see contact, branch, timer, and counter decisions.</p>';
+    return;
+  }
+  container.innerHTML = plcLastExplanations.map(item => {
+    const branches = item.branchResults.map((branch, index) => {
+      const contacts = branch.contacts.map(contact => {
+        const status = contact.closed ? 'closed' : 'open';
+        const test = contact.value === undefined ? '' :
+          ` (${contact.value}% ${contact.operator === 'gte' ? '&ge;' : '&le;'} ${contact.threshold}%)`;
+        return `${escapeHtml(contact.tag)} ${status}${test}`;
+      }).join(' AND ');
+      return `Path ${index + 1}: ${contacts} → ${branch.energised ? 'TRUE' : 'FALSE'}`;
+    }).join('; ');
+    const instruction = item.instruction
+      ? ` · ${item.instruction.type} ${item.instruction.tag}: ${item.instruction.elapsedScans !== undefined ? `${item.instruction.elapsedScans}/${item.instruction.presetScans} scans` : `${item.instruction.count}/${item.instruction.preset}`} ${item.instruction.done ? 'DONE' : 'not done'}${item.instruction.reset ? ' · reset' : ''}`
+      : '';
+    const analogOutput = item.analogOutput
+      ? ` · ${item.analogOutput.tag} = ${item.analogOutput.value}%`
+      : '';
+    return `<p class="plc-explanation-rung"><strong>${escapeHtml(item.coil)} ${item.energised ? 'energized' : 'de-energized'}</strong><span>${branches}${instruction}${analogOutput}</span></p>`;
+  }).join('');
 }
 
 function renderPlcTrend() {
@@ -2924,9 +3182,13 @@ function renderPlcWorkspace() {
   renderPlcFaultTargets();
   renderPlcInputs();
   renderPlcOutputs();
+  renderPlcWatchTable();
   renderPlcLadder();
+  renderPlcExplanation();
   renderPlcTrend();
   $('#plc-scan-count').textContent = String(plcScanCount);
+  renderPlcChallenges();
+  renderPlcTroubleshooting();
 }
 
 function updatePlcScan() {
@@ -2935,20 +3197,26 @@ function updatePlcScan() {
   if (plcFault === 'input-open' && plcFaultTarget.startsWith('I')) inputImage[plcFaultTarget] = false;
   if (plcFault === 'input-short' && plcFaultTarget.startsWith('I')) inputImage[plcFaultTarget] = true;
   if (plcFault === 'output-inhibit' && plcFaultTarget.startsWith('Q')) inhibitedOutput = plcFaultTarget;
-  const result = window.DangoteAcademyCore.calculatePlcScan(plcModel, inputImage, plcOutputs);
+  const result = window.DangoteAcademyCore.calculatePlcScan(
+    plcModel, inputImage, plcOutputs, plcRuntimeState, plcAnalogInputs
+  );
   if (!result.valid) {
     stopPlcScans();
     $('#plc-status-text').textContent = `Program error: ${result.error}`;
     return false;
   }
   plcOutputs = { ...result.outputs };
+  plcAnalogOutputs = { AQ0: result.analogOutputs.AQ0 || 0 };
+  plcRuntimeState = result.runtimeState;
   plcRungStates = result.rungStates;
+  plcLastExplanations = result.rungStates;
   plcScanCount += 1;
   plcTrendSamples.push({ scan: plcScanCount, outputs: { ...plcOutputs } });
   plcTrendSamples = plcTrendSamples.slice(-60);
   const energizedCount = Object.entries(plcOutputs)
     .filter(([tag, on]) => on && tag !== inhibitedOutput).length;
   $('#plc-status-text').textContent = `Scan complete · ${energizedCount} output${energizedCount === 1 ? '' : 's'} energized${plcFault === 'none' ? '' : ` · ${$('#plc-fault').selectedOptions[0].textContent}`}.`;
+  savePlcState();
   renderPlcWorkspace();
   return true;
 }
@@ -2959,8 +3227,12 @@ function selectPlcProgram(programId) {
   plcProgramId = programId;
   plcModel = clonePlcProgram(plcPrograms[programId]);
   plcInputs = Object.fromEntries(plcInputCatalog.map(input => [input.tag, input.initial]));
+  plcAnalogInputs = Object.fromEntries(plcAnalogInputCatalog.map(input => [input.tag, input.initial]));
   plcOutputs = Object.fromEntries(plcOutputCatalog.map(output => [output.tag, false]));
+  plcAnalogOutputs = { AQ0: 0 };
+  plcRuntimeState = { timers: {}, counters: {} };
   plcRungStates = [];
+  plcLastExplanations = [];
   plcScanCount = 0;
   plcTrendSamples = [];
   plcFault = 'none';
@@ -2982,7 +3254,7 @@ function startPlcScans() {
   }
   $('#plc-run').innerHTML = '<i class="fa-solid fa-stop"></i> Stop scans';
   $('#plc-run').className = 'secondary-button';
-  updatePlcScan();
+  if (!updatePlcScan()) return;
   plcScanTimer = setInterval(updatePlcScan, 500);
 }
 
@@ -3003,17 +3275,50 @@ function handlePlcLadderEdit(event) {
   const target = event.target;
   const rungIndex = Number(target.dataset.rung);
   if (!Number.isInteger(rungIndex) || !plcModel.rungs[rungIndex]) return;
-  if (target.matches('[data-plc-contact-tag], [data-plc-contact-type]')) {
+  if (target.matches('[data-plc-contact-tag], [data-plc-contact-type], [data-plc-analog-operator], [data-plc-analog-threshold]')) {
     const branchIndex = Number(target.dataset.branch);
     const contactIndex = Number(target.dataset.contact);
     const contact = plcModel.rungs[rungIndex].branches[branchIndex]?.[contactIndex];
     if (!contact) return;
-    if (target.matches('[data-plc-contact-tag]')) contact.tag = target.value;
-    else contact.normallyClosed = target.value === 'nc';
+    if (target.matches('[data-plc-contact-tag]')) {
+      contact.tag = target.value;
+      if (target.value.startsWith('AI')) {
+        contact.analogOperator ||= 'gte';
+        contact.threshold = Number.isFinite(contact.threshold) ? contact.threshold : 50;
+      } else {
+        delete contact.analogOperator;
+        delete contact.threshold;
+      }
+    } else if (target.matches('[data-plc-contact-type]')) contact.normallyClosed = target.value === 'nc';
+    else if (target.matches('[data-plc-analog-operator]')) contact.analogOperator = target.value;
+    else {
+      const threshold = target.valueAsNumber;
+      if (!Number.isFinite(threshold) || threshold < 0 || threshold > 100) {
+        $('#plc-status-text').textContent = 'Analog compare threshold must be between 0 and 100%.';
+        return;
+      }
+      contact.threshold = threshold;
+    }
     updatePlcProgram('Ladder contact updated.');
   } else if (target.matches('[data-plc-coil]')) {
     plcModel.rungs[rungIndex].coil = target.value;
     updatePlcProgram('Output coil updated.');
+  } else if (target.matches('[data-plc-timer-preset]')) {
+    plcModel.rungs[rungIndex].timer.presetScans = target.valueAsNumber;
+    updatePlcProgram('Timer preset updated.');
+  } else if (target.matches('[data-plc-counter-preset]')) {
+    plcModel.rungs[rungIndex].counter.preset = target.valueAsNumber;
+    updatePlcProgram('Counter preset updated.');
+  } else if (target.matches('[data-plc-counter-reset]')) {
+    plcModel.rungs[rungIndex].counter.resetTag = target.value;
+    updatePlcProgram('Counter reset input updated.');
+  } else if (target.matches('[data-plc-analog-output]')) {
+    if (target.value) plcModel.rungs[rungIndex].analogOutput = { tag: target.value, value: 50 };
+    else delete plcModel.rungs[rungIndex].analogOutput;
+    updatePlcProgram('Analog output assignment updated.');
+  } else if (target.matches('[data-plc-analog-setpoint]')) {
+    plcModel.rungs[rungIndex].analogOutput.value = target.valueAsNumber;
+    updatePlcProgram('Analog output setpoint updated.');
   }
 }
 
@@ -3022,7 +3327,34 @@ function handlePlcLadderAction(event) {
   if (!button) return;
   const rungIndex = Number(button.dataset.rung);
   const rung = plcModel.rungs[rungIndex];
-  if (button.matches('[data-plc-add-series]')) {
+  if (button.matches('[data-plc-add-instruction]')) {
+    if (!rung || rung.timer || rung.counter) return;
+    const kind = button.dataset.plcAddInstruction;
+    const used = new Set(plcModel.rungs.map(item => item.timer?.tag || item.counter?.tag).filter(Boolean));
+    const prefix = kind === 'timer' ? 'T' : 'C';
+    const tag = Array.from({ length: 100 }, (_, index) => `${prefix}${index}`).find(item => !used.has(item));
+    if (!tag) {
+      $('#plc-status-text').textContent = `No ${kind} identifiers remain.`;
+      return;
+    }
+    if (kind === 'timer') rung.timer = { tag, presetScans: 5 };
+    else rung.counter = { tag, preset: 3, resetTag: 'I0.5' };
+    updatePlcProgram(`${kind === 'timer' ? 'TON timer' : 'CTU counter'} added.`);
+  } else if (button.matches('[data-plc-remove-instruction]')) {
+    if (!rung) return;
+    const tag = rung.timer?.tag || rung.counter?.tag;
+    for (const currentRung of plcModel.rungs) for (const branch of currentRung.branches) {
+      for (let index = branch.length - 1; index >= 0; index--) {
+        if (branch[index].tag === `${tag}.DN`) branch.splice(index, 1);
+      }
+      if (!branch.length) branch.push({ tag: 'I0.0', normallyClosed: false });
+    }
+    delete rung.timer;
+    delete rung.counter;
+    delete plcRuntimeState.timers[tag];
+    delete plcRuntimeState.counters[tag];
+    updatePlcProgram('Timer or counter instruction removed.');
+  } else if (button.matches('[data-plc-add-series]')) {
     const branch = rung?.branches[Number(button.dataset.branch)];
     if (!branch || branch.length >= 6) {
       $('#plc-status-text').textContent = 'A branch is limited to 6 series contacts.';
@@ -3053,6 +3385,138 @@ function handlePlcLadderAction(event) {
     plcModel.rungs.splice(rungIndex, 1);
     updatePlcProgram('Rung removed.');
   }
+}
+
+function renderPlcChallenges() {
+  const select = $('#plc-challenge');
+  const selected = select.value;
+  select.innerHTML = plcChallenges.map(challenge =>
+    `<option value="${challenge.id}">${escapeHtml(challenge.title)}</option>`
+  ).join('');
+  if (plcChallenges.some(challenge => challenge.id === selected)) select.value = selected;
+  else select.value = plcChallenges[0].id;
+  const challenge = plcChallenges.find(item => item.id === select.value);
+  const progress = getPlcChallengeProgress();
+  const record = progress[challenge.id] || { attempts: 0, completed: false };
+  $('#plc-challenge-guidance').innerHTML = `<strong>Goal:</strong> ${escapeHtml(challenge.objective)} <span>Suggested example: ${escapeHtml(plcPrograms[challenge.programId].title)}. ${escapeHtml(challenge.hint)}</span>`;
+  $('#plc-challenge-feedback').textContent = record.completed
+    ? `Completed in ${record.attempts} attempt${record.attempts === 1 ? '' : 's'}.`
+    : record.attempts ? `Attempts: ${record.attempts}. Adjust the ladder and check again.` : '';
+  $('#plc-challenge-score').textContent = String(plcChallenges.filter(item => progress[item.id]?.completed).length);
+  $('#plc-challenge-total').textContent = String(plcChallenges.length);
+}
+
+function checkPlcChallenge() {
+  const challenge = plcChallenges.find(item => item.id === $('#plc-challenge').value);
+  if (!challenge) return;
+  const progress = getPlcChallengeProgress();
+  const record = progress[challenge.id] || { attempts: 0, completed: false };
+  record.attempts = (Number(record.attempts) || 0) + 1;
+  let passed = true;
+  let outputs = {};
+  let runtimeState = { timers: {}, counters: {} };
+  for (const step of challenge.steps) {
+    const result = window.DangoteAcademyCore.calculatePlcScan(
+      plcModel, step.inputs, outputs, runtimeState,
+      { ...Object.fromEntries(plcAnalogInputCatalog.map(input => [input.tag, input.initial])), ...step.analogInputs }
+    );
+    if (!result.valid || Object.entries(step.outputs).some(([tag, value]) => result.outputs[tag] !== value) ||
+      Object.entries(step.analogOutputs || {}).some(([tag, value]) => result.analogOutputs[tag] !== value)) {
+      passed = false;
+      break;
+    }
+    outputs = result.outputs;
+    runtimeState = result.runtimeState;
+  }
+  if (passed) {
+    record.completed = true;
+    record.completedAt = new Date().toISOString();
+  }
+  progress[challenge.id] = record;
+  localStorage.setItem(plcChallengeStorageKey, JSON.stringify(progress));
+  renderPlcChallenges();
+  renderStudentProgressSummary();
+  $('#plc-challenge-feedback').textContent = passed
+    ? `Challenge passed: ${challenge.objective}`
+    : `Not yet. The active ladder did not meet every test case. Hint: ${challenge.hint}`;
+}
+
+function renderPlcTroubleshooting() {
+  const progress = getPlcTroubleshootingProgress();
+  $('#plc-diagnostic-results').innerHTML = plcTroubleshootingCases.map((scenario, index) => {
+    const record = progress[scenario.id] || { attempts: 0, completed: false };
+    const options = scenario.options.map((option, answer) => {
+      const isCorrect = record.completed && answer === scenario.answer;
+      const isSelected = !record.completed && answer === record.lastAnswer;
+      return `<button class="scenario-option${isCorrect ? ' correct' : isSelected ? ' incorrect' : ''}" data-plc-diagnostic="${scenario.id}" data-answer="${answer}" ${record.completed ? 'disabled' : ''}>${escapeHtml(option)}</button>`;
+    }).join('');
+    const feedback = record.completed
+      ? `<p class="scenario-feedback plc-diagnostic-feedback">${escapeHtml(scenario.rationale)}</p>`
+      : record.lastAnswer !== undefined
+        ? '<p class="scenario-feedback plc-diagnostic-feedback">Review the input image, contact state, rung path, and output image before trying again.</p>'
+        : '';
+    return `<article class="scenario-card plc-scenario-card"><h3>${escapeHtml(scenario.title)}</h3><p>${escapeHtml(scenario.symptom)}</p><small>Attempts: ${Number(record.attempts) || 0}${record.completed ? ' · Completed' : ''}</small><div class="scenario-options">${options}</div>${feedback}</article>`;
+  }).join('');
+  $('#plc-diagnostics-score').textContent = String(plcTroubleshootingCases.filter(item => progress[item.id]?.completed).length);
+  $('#plc-diagnostics-total').textContent = String(plcTroubleshootingCases.length);
+}
+
+function answerPlcDiagnostic(event) {
+  const option = event.target.closest('[data-plc-diagnostic]');
+  if (!option || option.disabled) return;
+  const scenario = plcTroubleshootingCases.find(item => item.id === option.dataset.plcDiagnostic);
+  const selectedAnswer = Number(option.dataset.answer);
+  if (!scenario || !Number.isInteger(selectedAnswer) || selectedAnswer < 0 || selectedAnswer >= scenario.options.length) return;
+  const progress = getPlcTroubleshootingProgress();
+  const record = progress[scenario.id] || { attempts: 0, completed: false };
+  record.attempts = (Number(record.attempts) || 0) + 1;
+  record.lastAnswer = selectedAnswer;
+  if (selectedAnswer === scenario.answer) {
+    record.completed = true;
+    record.completedAt = new Date().toISOString();
+  }
+  progress[scenario.id] = record;
+  localStorage.setItem(plcTroubleshootingStorageKey, JSON.stringify(progress));
+  renderPlcTroubleshooting();
+  renderStudentProgressSummary();
+}
+
+function exportPlcProgram() {
+  const snapshot = getPlcSnapshot();
+  const blob = new Blob([JSON.stringify(snapshot, null, 2)], { type: 'application/json' });
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(blob);
+  link.download = `plc-${plcProgramId}.json`;
+  link.click();
+  URL.revokeObjectURL(link.href);
+  showToast('PLC program exported as JSON.');
+}
+
+function importPlcProgram(event) {
+  const file = event.target.files?.[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const snapshot = JSON.parse(reader.result);
+      validatePlcSnapshot(snapshot);
+      restorePlcSnapshot(snapshot);
+      $('#plc-program').value = plcProgramId;
+      $('#plc-status-text').textContent = 'PLC program imported and saved on this device.';
+      showToast('PLC program imported.');
+    } catch (error) {
+      console.error('PLC program could not be imported.', error);
+      showToast(error instanceof SyntaxError ? 'The selected file is not valid JSON.' : error.message || 'The PLC program is invalid.');
+    } finally {
+      event.target.value = '';
+    }
+  };
+  reader.onerror = () => {
+    console.error('PLC program file could not be read.', reader.error);
+    showToast('The selected PLC program file could not be read.');
+    event.target.value = '';
+  };
+  reader.readAsText(file);
 }
 
 function toggleSimulation() {
@@ -3167,6 +3631,18 @@ function initialise() {
     savePlcState();
     updatePlcScan();
   });
+  $('#plc-watch-table').addEventListener('change', event => {
+    const input = event.target.closest('[data-plc-analog-input]');
+    if (!input) return;
+    const value = input.valueAsNumber;
+    if (!Number.isFinite(value) || value < 0 || value > 100) {
+      $('#plc-status-text').textContent = 'Analog input value must be between 0 and 100%.';
+      return;
+    }
+    plcAnalogInputs[input.dataset.plcAnalogInput] = value;
+    savePlcState();
+    updatePlcScan();
+  });
   $('#plc-fault').addEventListener('change', event => {
     plcFault = event.target.value;
     renderPlcFaultTargets();
@@ -3195,6 +3671,12 @@ function initialise() {
   $('#plc-reset').addEventListener('click', resetPlcProgram);
   $('#plc-ladder').addEventListener('change', handlePlcLadderEdit);
   $('#plc-ladder').addEventListener('click', handlePlcLadderAction);
+  $('#plc-challenge').addEventListener('change', renderPlcChallenges);
+  $('#plc-check-challenge').addEventListener('click', checkPlcChallenge);
+  $('#plc-diagnostic-results').addEventListener('click', answerPlcDiagnostic);
+  $('#plc-export').addEventListener('click', exportPlcProgram);
+  $('#plc-import').addEventListener('click', () => $('#plc-file').click());
+  $('#plc-file').addEventListener('change', importPlcProgram);
   $('#walkthrough-check').addEventListener('click', checkCircuitWalkthroughStep);
   $('#walkthrough-reset').addEventListener('click', startCircuitWalkthrough);
   $('#meter-measurement').addEventListener('change', renderVirtualInstruments);
