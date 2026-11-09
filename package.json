@@ -5,7 +5,11 @@
   "description": "Production-ready static training workspace for electrical engineering education.",
   "scripts": {
     "test": "node --test tests/core.test.js",
-    "check": "node --check core.js && node --check script.js"
+    "check": "node --check core.js && node --check script.js",
+    "test:browser": "playwright test --config tests/playwright.config.js"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.65.0"
   },
   "engines": {
     "node": ">=20"

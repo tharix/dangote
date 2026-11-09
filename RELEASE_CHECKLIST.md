@@ -7,7 +7,7 @@ Use this checklist before publishing a production change.
 - [ ] Work from a focused branch or pull request.
 - [ ] Run `npm test`.
 - [ ] Run `npm run check`.
-- [ ] Open `tests/browser-test.html` and confirm every test passes.
+- [ ] Run `npm run test:browser` and confirm every browser integration test passes.
 - [ ] Manually exercise the affected workflow in a local static server.
 - [ ] Export and restore a backup with sample data, including an empty project list.
 - [ ] Generate the unified engineering PDF and inspect its sections and circuit page.

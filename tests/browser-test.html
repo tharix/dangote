@@ -8,8 +8,8 @@
 <body>
   <h1>Browser tests</h1>
   <ul id="results"></ul>
-  <script src="../core.js?v=20261106-backup1"></script>
-  <iframe id="app" src="../index.html?browser-test=1&v=20261106-backup1" hidden title="application under test"></iframe>
+  <script src="../core.js?v=20261109-auth-fragment1"></script>
+  <iframe id="app" src="../index.html?browser-test=1&v=20261109-auth-fragment1" hidden title="application under test"></iframe>
   <script>
     const results = document.querySelector('#results');
     const tests = [
@@ -1075,6 +1075,7 @@
         }
         results.appendChild(item);
       });
+      results.dataset.complete = 'true';
       app.location.reload();
     }
     function snapshotStorage(storage) {

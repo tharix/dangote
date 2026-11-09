@@ -31,6 +31,16 @@ npm run check
 ```
 
 There is also a dependency-free browser test page at `tests/browser-test.html`.
+Run its integration checks in Chromium with:
+
+```powershell
+npm ci
+npx playwright install chromium
+npm run test:browser
+```
+
+The CI workflow runs these browser checks in addition to the Node.js tests and
+syntax checks.
 
 ## Offline support
 
@@ -91,7 +101,7 @@ The standards record is autosaved locally, travels with named projects and revis
 
 1. Create a Supabase project and apply [supabase/schema.sql](./supabase/schema.sql) in its SQL editor.
 2. Copy the project URL and public anon/publishable key into [supabase-config.js](./supabase-config.js). These browser-visible values are not secrets; database permissions must remain enforced by RLS.
-3. Configure Supabase Auth's site URL and redirect allowlist for the deployed app, then invite users through Supabase Auth. Invitation and recovery links return to the app, where users must set a 12-character-minimum password. Profiles are created as students by default. A trusted project administrator must assign instructor roles in the database; never let a browser choose its server role.
+3. Configure Supabase Auth's site URL and redirect allowlist for the deployed app, then invite users through Supabase Auth. Use the standard hosted confirmation flow so verification credentials return in the URL fragment; do not configure email templates or redirects to put `token_hash` values in the query string. Invitation and recovery links return to the app, where users must set a 12-character-minimum password. Profiles are created as students by default. A trusted project administrator must assign instructor roles in the database; never let a browser choose its server role.
 4. An instructor signs in, creates a cohort, and shares its invite code with enrolled students. Students sign in and join using that code. Cloud submissions and review actions are checked by database policies and triggers.
 
 The browser keeps its access and refresh tokens in session-scoped storage, not in full-device backups. Use HTTPS in deployment. The local profile role remains editable and is never the cloud authorization source. Instructor cohort views are limited by RLS to their memberships; review actions are recorded by a database trigger. Apply the migration to a test Supabase project and verify its policies before using real learner records.
@@ -120,7 +130,7 @@ Use [RELEASE_CHECKLIST.md](./RELEASE_CHECKLIST.md) for production releases and p
 
 ## Deployment
 
-The [Deploy static app](./.github/workflows/deploy-pages.yml) workflow publishes the repository through GitHub Pages. Enable Pages with **GitHub Actions** as the source in repository settings.
+The [Deploy static app](./.github/workflows/deploy-pages.yml) workflow publishes only the app entry point, runtime scripts/styles, and vendored assets through GitHub Pages. Enable Pages with **GitHub Actions** as the source in repository settings.
 
 Production site: [https://tharix.github.io/dangote/](https://tharix.github.io/dangote/)
 

@@ -746,17 +746,8 @@ async function processCloudAuthCallback() {
     clearCloudAuthCallback();
     return session;
   }
-  const query = new URLSearchParams(window.location.search);
-  const tokenHash = query.get('token_hash');
-  const queryType = query.get('type');
-  if (tokenHash && ['invite', 'recovery', 'signup'].includes(queryType)) {
-    const session = await sendCloudRequest('/auth/v1/verify', {
-      method: 'POST',
-      body: { token_hash: tokenHash, type: queryType }
-    });
-    const saved = saveCloudSession(session, true);
+  if (new URLSearchParams(window.location.search).has('token_hash')) {
     clearCloudAuthCallback();
-    return saved;
   }
   return null;
 }

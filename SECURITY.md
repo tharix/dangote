@@ -22,7 +22,10 @@ The application is offline-first and ships without Supabase credentials.
 Never commit a Supabase service-role key; browser configuration may only use an
 anon key protected by the policies in `supabase/schema.sql`. The browser stores
 authenticated session tokens in session-scoped storage; they are not included
-in workspace backups. Keep the Content Security Policy restrictive and do not
+in workspace backups. Authentication links must return credentials in the URL
+fragment; do not put `token_hash` values in query strings or custom email-template
+redirects. The app rejects query-string verification tokens and uses a
+`no-referrer` policy. Keep the Content Security Policy restrictive and do not
 add unreviewed scripts that could read those tokens.
 
 Before using real learner data, apply and review the Supabase policies and
