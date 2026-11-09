@@ -9,6 +9,7 @@ Thumbs.db
 node_modules/
 coverage/
 dist/
+_site/
 playwright-report/
 test-results/
 *.log
