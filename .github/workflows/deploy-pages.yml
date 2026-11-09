@@ -19,15 +19,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/configure-pages@v5
+      - name: Prepare Pages artifact
+        run: |
+          mkdir -p _site/assets
+          cp .nojekyll core.js index.html script.js styles.css supabase-config.js _site/
+          cp -R assets/vendor _site/assets/
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: |
-            .nojekyll
-            assets/
-            core.js
-            index.html
-            script.js
-            styles.css
-            supabase-config.js
+          path: _site
       - id: deployment
         uses: actions/deploy-pages@v4
