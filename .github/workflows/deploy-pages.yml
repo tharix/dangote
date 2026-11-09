@@ -21,6 +21,13 @@ jobs:
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: .
+          path: |
+            .nojekyll
+            assets/
+            core.js
+            index.html
+            script.js
+            styles.css
+            supabase-config.js
       - id: deployment
         uses: actions/deploy-pages@v4

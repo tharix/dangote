@@ -91,6 +91,10 @@ const plcOutputCatalog = [
   { tag: 'Q0.1', label: 'Fault indicator' },
   { tag: 'Q0.2', label: 'Fill valve' }
 ];
+const plcAnalogInputCatalog = [
+  { tag: 'AI0', label: 'Tank level', unit: '%', initial: 20 },
+  { tag: 'AI1', label: 'Flow feedback', unit: '%', initial: 0 }
+];
 const plcPrograms = {
   'motor-starter': {
     title: 'Motor starter · seal-in and overload',
@@ -113,19 +117,70 @@ const plcPrograms = {
       { branches: [[{ tag: 'I0.2', normallyClosed: true }]], coil: 'Q0.1' },
       { branches: [[{ tag: 'Q0.0', normallyClosed: false }]], coil: 'Q0.2' }
     ]
+  },
+  'analog-level': {
+    title: 'Analog level · comparator and valve command',
+    rungs: [
+      { branches: [[{ tag: 'AI0', normallyClosed: false, analogOperator: 'lte', threshold: 30 }]], coil: 'Q0.2', analogOutput: { tag: 'AQ0', value: 65 } },
+      { branches: [[{ tag: 'AI0', normallyClosed: false, analogOperator: 'gte', threshold: 90 }]], coil: 'Q0.1' }
+    ]
   }
 };
+const plcChallenges = [
+  {
+    id: 'plc-seal-in', title: 'Build a seal-in starter', programId: 'motor-starter',
+    objective: 'Start seals the output in; the stop loop or overload must drop it out.',
+    hint: 'Use parallel start and output-hold branches, then place stop-loop and overload contacts in series.',
+    steps: [
+      { inputs: { 'I0.0': true, 'I0.1': true, 'I0.2': true, 'I0.3': true }, outputs: { 'Q0.0': true } },
+      { inputs: { 'I0.0': false, 'I0.1': true, 'I0.2': true, 'I0.3': true }, outputs: { 'Q0.0': true } },
+      { inputs: { 'I0.0': false, 'I0.1': false, 'I0.2': true, 'I0.3': true }, outputs: { 'Q0.0': false } },
+      { inputs: { 'I0.0': true, 'I0.1': true, 'I0.2': false, 'I0.3': true }, outputs: { 'Q0.0': false, 'Q0.1': true } }
+    ]
+  },
+  {
+    id: 'plc-guard-interlock', title: 'Add a guard interlock', programId: 'conveyor',
+    objective: 'The conveyor must stop when the guard opens and signal the guard fault.',
+    hint: 'Put the guard-closed contact in series with both the start path and seal-in path.',
+    steps: [
+      { inputs: { 'I0.0': true, 'I0.1': true, 'I0.3': true, 'I0.4': true }, outputs: { 'Q0.0': true, 'Q0.1': false } },
+      { inputs: { 'I0.0': false, 'I0.1': true, 'I0.3': true, 'I0.4': true }, outputs: { 'Q0.0': true } },
+      { inputs: { 'I0.0': false, 'I0.1': true, 'I0.3': false, 'I0.4': true }, outputs: { 'Q0.0': false, 'Q0.1': true } }
+    ]
+  },
+  {
+    id: 'plc-analog-control', title: 'Create an analog level response', programId: 'analog-level',
+    objective: 'Enable the valve command below 30% level and raise a high-level alarm at 90%.',
+    hint: 'Set the analog contact comparison and assign the analog output value on its rung.',
+    steps: [
+      { inputs: {}, analogInputs: { AI0: 20 }, outputs: { 'Q0.2': true }, analogOutputs: { AQ0: 65 } },
+      { inputs: {}, analogInputs: { AI0: 60 }, outputs: { 'Q0.2': false }, analogOutputs: { AQ0: 0 } },
+      { inputs: {}, analogInputs: { AI0: 95 }, outputs: { 'Q0.1': true } }
+    ]
+  }
+];
+const plcTroubleshootingCases = [
+  { id: 'plc-stop-loop', title: 'Starter drops out immediately', symptom: 'Start input is visible, but the motor output drops on the next scan.', options: ['Check the stop-loop healthy input and its series contact in both start and seal paths', 'Increase the timer preset', 'Force the output coil on'], answer: 0, rationale: 'A healthy stop loop is commonly represented by an energized input and a normally-open logical contact; loss of that permissive breaks both paths.' },
+  { id: 'plc-guard', title: 'Conveyor will not restart', symptom: 'The guard appears closed, but the PLC input image remains OFF.', options: ['Compare the field signal indication with the input image and verify the interlock path in the program', 'Bridge the guard switch input', 'Disable the guard fault rung'], answer: 0, rationale: 'Compare the simulated field input, input image, and rung state. Never bypass a real guard or safety circuit.' },
+  { id: 'plc-analog', title: 'Valve command stays at zero', symptom: 'Tank level is below the demand threshold, but the analog output remains at 0%.', options: ['Check AI scaling/range, comparator direction and threshold, rung power flow, and AQ assignment', 'Raise the high-level alarm threshold', 'Force the valve output on'], answer: 0, rationale: 'Trace the scaled analog input, comparison, rung, and output assignment in sequence.' }
+];
 const plcStorageKey = 'dangote-academy-plc';
+const plcChallengeStorageKey = 'dangote-academy-plc-challenges';
+const plcTroubleshootingStorageKey = 'dangote-academy-plc-troubleshooting';
 let plcProgramId = 'motor-starter';
 let plcModel = null;
 let plcInputs = Object.fromEntries(plcInputCatalog.map(input => [input.tag, input.initial]));
 let plcOutputs = Object.fromEntries(plcOutputCatalog.map(output => [output.tag, false]));
+let plcAnalogInputs = Object.fromEntries(plcAnalogInputCatalog.map(input => [input.tag, input.initial]));
+let plcAnalogOutputs = { AQ0: 0 };
+let plcRuntimeState = { timers: {}, counters: {} };
 let plcRungStates = [];
 let plcScanCount = 0;
 let plcScanTimer = null;
 let plcTrendSamples = [];
 let plcFault = 'none';
 let plcFaultTarget = 'I0.2';
+let plcLastExplanations = [];
 
 const troubleshootingScenarios = [
   { title: 'Motor starter will not run', symptom: 'The supply is present, but the contactor does not pull in when the start button is pressed.', options: ['Check the control fuse and overload contact', 'Replace the motor bearings', 'Increase the motor cable size'], answer: 0 },
@@ -303,6 +358,74 @@ const commissioningChecks = [
   { id: 'handover', title: 'Records and handover', description: 'As-built drawings, schedules, labels, certificates, and outstanding actions handed over.' }
 ];
 const commissioningStatuses = ['not-recorded', 'recorded', 'review'];
+const standardsReviewChecks = [
+  { id: 'design-basis', title: 'Design basis and assumptions', description: 'Confirm the project scope, supply characteristics, design assumptions, and applicable documents.' },
+  { id: 'demand', title: 'Load assessment', description: 'Review connected loads, demand assumptions, diversity, phase allocation, and schedules.' },
+  { id: 'conductors', title: 'Conductors and voltage drop', description: 'Review conductor material, installation conditions, correction factors, capacity, and voltage drop.' },
+  { id: 'protection', title: 'Overcurrent and fault protection', description: 'Review protective-device selection, coordination, disconnection, and fault calculations.' },
+  { id: 'earthing', title: 'Earthing and bonding', description: 'Review earthing arrangement, protective conductors, bonding, and associated evidence.' },
+  { id: 'special-locations', title: 'Environmental and special conditions', description: 'Review external influences, locations, equipment ratings, and any project-specific requirements.' },
+  { id: 'verification', title: 'Inspection and verification', description: 'Review inspection, testing, measured results, methods, and records required for the project.' },
+  { id: 'documentation', title: 'Drawings and handover', description: 'Review drawings, schedules, labels, certificates, deviations, and outstanding actions.' }
+];
+const standardsReviewCrosswalk = [
+  {
+    topic: 'Load, current, and schedule demand',
+    model: 'Load sizing and load schedule apply nominal 230/400 V assumptions, power factor, and user-entered diversity.',
+    references: 'NESIS 2015 sections 7.2.2, 7.2.11.5-7.2.11.6 (PDF pp. 162, 204-205).',
+    review: 'Confirm supply basis and circuit category. NESIS distinguishes final sub-circuits from other circuits for diversity; verify whether the model applies diversity in a justified way for each use.'
+  },
+  {
+    topic: 'Cable capacity, installation, and voltage drop',
+    model: 'Cable ampacity, installation-method capacity, ambient/grouping factors, and voltage-drop constants are demonstration tables.',
+    references: 'NESIS 2015 section 7.2.3 (PDF pp. 162-164); section 10.3.1(c) (PDF pp. 246-247).',
+    review: 'Identify the governing NIS/IEC or other adopted tables and editions; verify conductor type, installation method, correction factors, circuit conditions, and voltage-drop criteria. Current demo constants have no verified standards source.'
+  },
+  {
+    topic: 'Overcurrent and fault protection',
+    model: 'Breaker selection compares load current with the demo cable-capacity table; the app does not calculate prospective fault current or device curves.',
+    references: 'NESIS 2015 sections 7.2.11.2, 7.2.14.1 (PDF pp. 200-202, 219-220).',
+    review: 'Assess breaking capacity, short-circuit withstand, discrimination/coordination, conductor protection, device characteristics, and required disconnection conditions. A nominal rating match alone is insufficient evidence.'
+  },
+  {
+    topic: 'Motor feeder and starting',
+    model: 'Motor estimate uses power, efficiency, power factor, and a user-selected starting-current multiplier.',
+    references: 'NESIS 2015 sections 7.2.11.9, 7.2.14.2 (PDF pp. 209-210, 220).',
+    review: 'Verify the applicable motor and starter rules, nameplate data, starting conditions, conductor sizing, overload/fault protection, isolation, and coordination. The demo multiplier is not a verified limit.'
+  },
+  {
+    topic: 'Earthing, bonding, and earth-leakage protection',
+    model: 'Circuit checks are topology heuristics; the app does not calculate earthing, electrode resistance, loop impedance, or RCD trip performance.',
+    references: 'NESIS 2015 Chapter 11, including sections 11.1, 11.5, 11.6 (PDF pp. 252-256); section 10.3.2 (PDF p. 247 onward).',
+    review: 'Identify the applicable earthing arrangement and adopted rules; independently review conductor sizing, bonding, fault protection, device selection, and required measured test evidence.'
+  },
+  {
+    topic: 'Inspection and verification',
+    model: 'The application stores user-entered installation notes and produces training reports; it performs no physical inspection or electrical tests.',
+    references: 'NESIS 2015 sections 10.3.1-10.3.2 (PDF pp. 246-248 onward).',
+    review: 'Have an authorized competent person determine applicable inspection, test methods, sequence, acceptance criteria, certification, and authority approvals for the actual installation.'
+  },
+  {
+    topic: 'Document status and applicable editions',
+    model: 'NESIS 2015 references BS 7671:2008. A 2025 NEMSA accreditation certificate (valid to 24 July 2029) lists NESIS 2015 among applicable documents, supporting current administrative use; formal legal continuation under the Electricity Act 2023 is not expressly confirmed by the sources reviewed.',
+    references: 'NESIS 2015 sections 1.2-1.3 (PDF pp. 12-15); NEMSA accreditation certificate (2025, valid to 24 July 2029): https://nemsa.gov.ng/wp-content/uploads/2025/08/NEMSA_Accreditation_Certificate.pdf; IET BS 7671:2018+A4:2026: https://electrical.theiet.org/guidance-and-codes-of-practice/publications-by-category/amendment-42026-to-bs-76712018-iet-wiring-regulations/; SON Digital Standards Platform: https://nnsdp.son.gov.ng/.',
+    review: 'Strong evidence supports NEMSA administrative use of NESIS 2015, but confirm its current legal basis and project scope with NEMSA. The IET now publishes BS 7671:2018+A4:2026; this does not by itself amend NESIS’s 2008 reference for Nigeria. Obtain controlled SON editions/amendments for each applicable NIS IEC standard and NCP 09; their current editions remain unverified.'
+  },
+  {
+    topic: 'Reviewer authorization and installation certification',
+    model: 'Reviewer identity and credentials are self-entered. NEMSA publishes category-based individual and corporate electrical-installation certification processes; the app cannot validate a person, certificate, category, competency, or signing authority.',
+    references: 'NEMSA certification process and scheme: https://nemsa.gov.ng/competency-certification/ and https://nemsa.gov.ng/wp-content/uploads/2025/04/UPDATED_REVISED-CERTIFICATION-SCHEMES_Signed-Copy-14052024.pdf; NEMSA roles: https://nemsa.gov.ng/our-roles/.',
+    review: 'Confirm the reviewer’s current NEMSA certificate, applicable category, work scope, and authority for this specific design review or installation certificate. The scheme is category-based and requires qualifications and experience evidence; the corporate engineer route includes interview/examination. The applicable signing authority for each certificate type still needs direct confirmation with NEMSA; a degree alone is not proof.'
+  },
+  {
+    topic: 'ECOWAS source supplied',
+    model: 'The supplied ECOWAS PDF identifies itself as the ECOWAS Energy Policy, updated version (69 PDF pages). It is policy context, not a wiring-installation code.',
+    references: 'ECOWAS Energy Policy, updated version, supplied PDF: https://eis.ecowas.int/assets/front/medias/doc/media_20231011104957.pdf.',
+    review: 'Do not use this policy document as a source for cable ampacity, protection, or installation acceptance criteria. Identify any separate adopted ECOWAS/NIS technical standards if applicable.'
+  }
+];
+const standardsReviewStatuses = ['not-reviewed', 'reviewed-acceptable', 'action-required', 'awaiting-evidence', 'not-applicable'];
+const standardsReviewStorageKey = 'dangote-academy-standards-review';
 const guidedLessons = [
   { id: 'safe-topology', title: 'Build a protected lighting circuit', objective: 'Create a valid source → MCB → lamp circuit using a phase conductor.', hint: 'Use AC mains, MCB, and Lamp, then connect both wires as line or Phase A/B/C.', check: () => validateCircuit() },
   { id: 'balanced-phases', title: 'Balance a three-phase schedule', objective: 'Assign equal diversified loads to Phase A, Phase B, and Phase C.', hint: 'Open Load Schedule, choose three-phase, and use equal loads on each phase.', check: () => Number($('#schedule-phase')?.value) === 3 && ['phase-a', 'phase-b', 'phase-c'].every(phase => $$('.schedule-row-phase').some(select => select.value === phase)) },
@@ -310,9 +433,27 @@ const guidedLessons = [
 ];
 const profileStorageKey = 'dangote-academy-profile';
 const profileDirectoryKey = 'dangote-academy-profiles';
+const cloudSessionStorageKey = 'dangote-academy-cloud-session';
 const troubleshootingStorageKey = 'dangote-academy-troubleshooting';
 const stationDiagnosticsStorageKey = 'dangote-academy-station-diagnostics';
 const electronicsDiagnosticsStorageKey = 'dangote-academy-electronics-diagnostics';
+let cloudContext = null;
+const workspaceBackupStorageKeys = [
+  'dangote-academy-profile',
+  'dangote-academy-profiles',
+  'dangote-academy-projects',
+  'dangote-academy-boq',
+  'dangote-academy-circuit',
+  'dangote-academy-installation',
+  'dangote-academy-standards-review',
+  'dangote-academy-lessons',
+  'dangote-academy-troubleshooting',
+  'dangote-academy-station-diagnostics',
+  'dangote-academy-electronics-diagnostics',
+  'dangote-academy-plc',
+  'dangote-academy-plc-challenges',
+  'dangote-academy-plc-troubleshooting'
+];
 
 const $ = (selector, parent = document) => parent.querySelector(selector);
 const $$ = (selector, parent = document) => [...parent.querySelectorAll(selector)];
@@ -329,7 +470,13 @@ function showToast(message) {
 }
 
 function switchModule(moduleId) {
-  $$('.nav-item').forEach(item => item.classList.toggle('active', item.dataset.module === moduleId));
+  if (moduleId !== 'plc-lab') stopPlcScans();
+  $$('.nav-item').forEach(item => {
+    const active = item.dataset.module === moduleId;
+    item.classList.toggle('active', active);
+    if (active) item.setAttribute('aria-current', 'page');
+    else item.removeAttribute('aria-current');
+  });
   $$('.module').forEach(module => module.classList.toggle('active', module.id === `module-${moduleId}`));
   $('#module-title').textContent = moduleTitles[moduleId] || moduleTitles.dashboard;
   $('#sidebar').classList.remove('open');
@@ -496,6 +643,606 @@ function renderVirtualInstruments() {
   $('#scope-vpp').textContent = acSignal ? `${(sourceVoltage * Math.sqrt(2)).toFixed(0)} V (modeled)` : dcSignal ? '0 V ripple (idealized)' : '0 V';
 }
 
+function getCloudConfiguration() {
+  const config = window.DANGOTE_SUPABASE_CONFIG;
+  if (!config || typeof config.url !== 'string' || typeof config.anonKey !== 'string' ||
+    !config.url.trim() || !config.anonKey.trim()) return null;
+  const endpoint = new URL(config.url);
+  if (endpoint.protocol !== 'https:' || !endpoint.hostname.endsWith('.supabase.co') ||
+    endpoint.pathname !== '/' || endpoint.search || endpoint.hash) {
+    throw new Error('Supabase URL must be an HTTPS Supabase project URL.');
+  }
+  return { url: endpoint.origin, anonKey: config.anonKey.trim() };
+}
+
+function getCloudSession() {
+  try {
+    const session = JSON.parse(sessionStorage.getItem(cloudSessionStorageKey) || 'null');
+    if (session?.accessToken && session?.refreshToken && session?.user?.id) return session;
+    return null;
+  } catch (error) {
+    console.error('Cloud sign-in session could not be read.', error);
+    sessionStorage.removeItem(cloudSessionStorageKey);
+    return null;
+  }
+}
+
+function saveCloudSession(session, requiresPasswordUpdate = false) {
+  const safeSession = {
+    accessToken: session.access_token,
+    refreshToken: session.refresh_token,
+    expiresAt: Number(session.expires_at) || Math.floor(Date.now() / 1000) + Number(session.expires_in || 3600),
+    user: { id: session.user.id, email: session.user.email || '' },
+    requiresPasswordUpdate
+  };
+  if (!safeSession.accessToken || !safeSession.refreshToken || !safeSession.user.id) {
+    throw new Error('The sign-in response did not contain a valid session.');
+  }
+  sessionStorage.setItem(cloudSessionStorageKey, JSON.stringify(safeSession));
+  return safeSession;
+}
+
+async function sendCloudRequest(path, { method = 'GET', body, token, prefer } = {}) {
+  const config = getCloudConfiguration();
+  if (!config) throw new Error('Cloud accounts are not configured.');
+  const headers = { apikey: config.anonKey, Accept: 'application/json' };
+  if (token) headers.Authorization = `Bearer ${token}`;
+  if (body !== undefined) headers['Content-Type'] = 'application/json';
+  if (prefer) headers.Prefer = prefer;
+  const response = await fetch(`${config.url}${path}`, {
+    method,
+    headers,
+    ...(body === undefined ? {} : { body: JSON.stringify(body) })
+  });
+  const text = await response.text();
+  let result = null;
+  if (text) {
+    try {
+      result = JSON.parse(text);
+    } catch (error) {
+      console.error('Cloud service returned malformed JSON.', error);
+      throw new Error('Cloud service returned an unreadable response.');
+    }
+  }
+  if (!response.ok) {
+    const message = result?.msg || result?.message || result?.hint || result?.error_description;
+    const requestError = new Error(message || `Cloud request failed (${response.status}).`);
+    requestError.status = response.status;
+    throw requestError;
+  }
+  return result;
+}
+
+async function refreshCloudSession(session) {
+  const result = await sendCloudRequest('/auth/v1/token?grant_type=refresh_token', {
+    method: 'POST',
+    body: { refresh_token: session.refreshToken }
+  });
+  return saveCloudSession(result, session.requiresPasswordUpdate === true);
+}
+
+function clearCloudAuthCallback() {
+  const url = new URL(window.location.href);
+  ['token_hash', 'type', 'error', 'error_code', 'error_description'].forEach(key => url.searchParams.delete(key));
+  url.hash = '';
+  const cleanUrl = `${url.pathname}${url.search}`;
+  window.history.replaceState(null, document.title, cleanUrl);
+}
+
+async function processCloudAuthCallback() {
+  const fragment = new URLSearchParams(window.location.hash.slice(1));
+  const fragmentType = fragment.get('type');
+  if (fragment.get('access_token') && fragment.get('refresh_token') &&
+    ['invite', 'recovery', 'signup'].includes(fragmentType)) {
+    const accessToken = fragment.get('access_token');
+    const user = await sendCloudRequest('/auth/v1/user', { token: accessToken });
+    const session = saveCloudSession({
+      access_token: accessToken,
+      refresh_token: fragment.get('refresh_token'),
+      expires_at: Number(fragment.get('expires_at')) || undefined,
+      expires_in: Number(fragment.get('expires_in')) || 3600,
+      user
+    }, true);
+    clearCloudAuthCallback();
+    return session;
+  }
+  if (new URLSearchParams(window.location.search).has('token_hash')) {
+    clearCloudAuthCallback();
+  }
+  return null;
+}
+
+async function cloudRequest(path, options = {}) {
+  let session = getCloudSession();
+  if (!session) throw new Error('Sign in to use the cloud workspace.');
+  if (session.expiresAt <= Math.floor(Date.now() / 1000) + 60) {
+    session = await refreshCloudSession(session);
+  }
+  try {
+    return await sendCloudRequest(path, { ...options, token: session.accessToken });
+  } catch (error) {
+    if (error.status !== 401) throw error;
+    session = await refreshCloudSession(session);
+    return sendCloudRequest(path, { ...options, token: session.accessToken });
+  }
+}
+
+function setCloudStatus(message, state) {
+  $('#cloud-status').textContent = message;
+  $('#cloud-state').textContent = state;
+}
+
+function getApiCollectionPath(table, filters = {}) {
+  const query = new URLSearchParams({ select: '*', ...filters });
+  return `/rest/v1/${table}?${query.toString()}`;
+}
+
+async function renderCloudWorkspace() {
+  const signInForm = $('#cloud-signin-form');
+  const account = $('#cloud-account');
+  if (!signInForm || !account) return;
+  let config;
+  try {
+    config = getCloudConfiguration();
+  } catch (error) {
+    setCloudStatus(error.message, 'Configuration error');
+    signInForm.hidden = true;
+    account.hidden = true;
+    return;
+  }
+  if (!config) {
+    $('#cloud-submit-cohort-wrap').hidden = true;
+    setCloudStatus('Cloud accounts are unavailable until a Supabase URL and public anon key are configured. Offline features continue to work.', 'Not configured');
+    signInForm.hidden = true;
+    account.hidden = true;
+    return;
+  }
+
+  let session;
+  try {
+    session = await processCloudAuthCallback() || getCloudSession();
+  } catch (error) {
+    console.error('Cloud account callback could not be verified.', error);
+    signInForm.hidden = false;
+    account.hidden = true;
+    setCloudStatus(`Account link could not be verified: ${error.message}`, 'Verification failed');
+    return;
+  }
+  if (!session) {
+    cloudContext = null;
+    $('#cloud-submit-cohort-wrap').hidden = true;
+    $('#cloud-cohorts').replaceChildren();
+    signInForm.hidden = false;
+    account.hidden = true;
+    setCloudStatus('Sign in with an account invited by your academy administrator. Cloud permissions are enforced by Supabase policies.', 'Signed out');
+    return;
+  }
+
+  signInForm.hidden = true;
+  account.hidden = false;
+  cloudContext = null;
+  $('#cloud-submit-cohort-wrap').hidden = true;
+  $('#cloud-cohorts').replaceChildren();
+  setCloudStatus('Loading account and class information...', 'Connecting');
+  try {
+    const profilePath = getApiCollectionPath('profiles', { user_id: `eq.${session.user.id}` });
+    const profiles = await cloudRequest(profilePath);
+    const profile = profiles?.[0];
+    if (!profile || !['student', 'instructor', 'administrator'].includes(profile.role)) {
+      throw new Error('Your account does not have an academy profile. Ask an administrator to provision it.');
+    }
+    const membershipPath = getApiCollectionPath('cohort_members', {
+      user_id: `eq.${session.user.id}`,
+      select: 'cohort_id,member_role,cohort:cohorts(id,name)'
+    });
+    const memberships = await cloudRequest(membershipPath);
+    const cohorts = [];
+    for (const membership of memberships || []) {
+      const cohort = Array.isArray(membership.cohort) ? membership.cohort[0] : membership.cohort;
+      if (!cohort) continue;
+      const projectPath = getApiCollectionPath('projects', {
+        cohort_id: `eq.${cohort.id}`,
+        order: 'updated_at.desc'
+      });
+      const projects = await cloudRequest(projectPath);
+      let members = [];
+      let inviteCode = '';
+      if (membership.member_role === 'instructor' || profile.role === 'administrator') {
+        const memberPath = getApiCollectionPath('cohort_members', {
+          cohort_id: `eq.${cohort.id}`,
+          select: 'user_id,member_role,profile:profiles(display_name)'
+        });
+        members = await cloudRequest(memberPath);
+        const invitePath = getApiCollectionPath('cohort_invites', {
+          cohort_id: `eq.${cohort.id}`,
+          select: 'invite_code'
+        });
+        inviteCode = (await cloudRequest(invitePath))?.[0]?.invite_code || '';
+      }
+      cohorts.push({ ...cohort, memberRole: membership.member_role, projects: projects || [], members, inviteCode });
+    }
+    cloudContext = { profile, cohorts };
+    $('#cloud-account-name').textContent = `${profile.display_name || session.user.email} (${profile.role})`;
+    $('#cloud-display-name').value = profile.display_name || '';
+    const needsPassword = session.requiresPasswordUpdate === true;
+    $('#cloud-profile-form').hidden = needsPassword;
+    $('#cloud-set-password-form').hidden = !needsPassword;
+    if (needsPassword) $('#cloud-submit-cohort-wrap').hidden = true;
+    $('#cloud-create-cohort-form').hidden = needsPassword || !['instructor', 'administrator'].includes(profile.role);
+    $('#cloud-join-cohort-form').hidden = needsPassword || profile.role !== 'student';
+    if (needsPassword) {
+      setCloudStatus('Choose a new password to complete the account invitation or recovery.', 'Password update required');
+      $('#cloud-cohorts').replaceChildren();
+      return;
+    }
+    renderCloudCohorts();
+    setCloudStatus('Cloud workspace connected. Account permissions and project access are checked by the server.', 'Connected');
+  } catch (error) {
+    console.error('Cloud workspace could not be loaded.', error);
+    if ([400, 401].includes(error.status)) {
+      sessionStorage.removeItem(cloudSessionStorageKey);
+      cloudContext = null;
+      signInForm.hidden = false;
+      account.hidden = true;
+      setCloudStatus('Cloud session expired or is no longer valid. Sign in again.', 'Signed out');
+      return;
+    }
+    setCloudStatus(`Cloud workspace could not be loaded: ${error.message}`, 'Connection error');
+  }
+}
+
+function renderCloudCohorts() {
+  const target = $('#cloud-cohorts');
+  if (!target || !cloudContext) return;
+  const cohortSelect = $('#cloud-submit-cohort');
+  const previousCohort = cohortSelect.value;
+  const studentCohorts = cloudContext.cohorts.filter(cohort => cohort.memberRole === 'student');
+  cohortSelect.innerHTML = '<option value="">Choose a class</option>';
+  studentCohorts.forEach(cohort => {
+    const option = document.createElement('option');
+    option.value = cohort.id;
+    option.textContent = cohort.name;
+    cohortSelect.appendChild(option);
+  });
+  cohortSelect.value = studentCohorts.some(cohort => cohort.id === previousCohort)
+    ? previousCohort
+    : studentCohorts.length === 1 ? studentCohorts[0].id : '';
+  $('#cloud-submit-cohort-wrap').hidden = cloudContext.profile.role !== 'student' || !studentCohorts.length;
+  target.innerHTML = cloudContext.cohorts.length ? cloudContext.cohorts.map(cohort => {
+    const staff = cohort.memberRole === 'instructor' || cloudContext.profile.role === 'administrator';
+    const membersById = new Map((cohort.members || []).map(member => {
+      const profile = Array.isArray(member.profile) ? member.profile[0] : member.profile;
+      return [member.user_id, profile?.display_name || 'Learner'];
+    }));
+    const pending = cohort.projects.filter(project => project.status === 'submitted').length;
+    const projectRows = cohort.projects.length ? cohort.projects.map(project => {
+      const actions = staff && project.status === 'submitted'
+        ? `<textarea maxlength="500" aria-label="Review comment for ${escapeHtml(project.name)}" data-cloud-comment="${escapeHtml(project.id)}" placeholder="Optional feedback"></textarea><button class="secondary-button cloud-review-action" data-cloud-project="${escapeHtml(project.id)}" data-cloud-status="approved">Approve</button><button class="secondary-button cloud-review-action" data-cloud-project="${escapeHtml(project.id)}" data-cloud-status="changes-requested">Request changes</button>`
+        : '';
+      const ownerAction = project.owner_id === getCloudSession()?.user.id
+        ? `<button class="secondary-button cloud-project-load" data-cloud-project="${escapeHtml(project.id)}">Load to this device</button>`
+        : '';
+      const progress = project.workspace?.learningProgress;
+      const progressText = progress
+        ? `<small>${Number(progress.lessonsCompleted) || 0}/${Number(progress.lessonsTotal) || 0} lessons | ${Number(progress.scenariosCompleted) || 0}/${Number(progress.scenariosTotal) || 0} building cases</small>`
+        : '';
+      const feedback = project.review_comment
+        ? `<small>Instructor feedback: ${escapeHtml(project.review_comment)}</small>`
+        : '';
+      const evidence = staff
+        ? `<details class="cloud-project-evidence"><summary>Project evidence</summary><pre>${escapeHtml(JSON.stringify({ boq: project.rows, workspace: project.workspace }, null, 2))}</pre></details>`
+        : '';
+      return `<div class="cloud-project-row"><span>${escapeHtml(membersById.get(project.owner_id) || (project.owner_id === getCloudSession()?.user.id ? cloudContext.profile.display_name || 'You' : 'Learner'))} - ${escapeHtml(project.name)}${progressText}${feedback}</span><span class="status ${project.status === 'approved' ? 'success' : project.status === 'changes-requested' ? 'danger' : 'info'}">${escapeHtml(project.status)}</span>${actions}${ownerAction}${evidence}</div>`;
+    }).join('') : '<p class="muted">No cloud projects in this cohort yet.</p>';
+    return `<article class="cloud-cohort-card"><div><h4>${escapeHtml(cohort.name)}</h4><p class="muted">${staff ? `${cohort.members.length} members | ${pending} awaiting review` : `${cohort.projects.length} of your projects`}</p>${staff && cohort.inviteCode ? `<p>Student invite code: <code>${escapeHtml(cohort.inviteCode)}</code></p>` : ''}</div>${projectRows}</article>`;
+  }).join('') : '<p class="muted">No cohorts yet. Join with an invite code or create a cohort if your account has instructor permissions.</p>';
+}
+
+async function signInToCloud(event) {
+  event.preventDefault();
+  const email = $('#cloud-email').value.trim();
+  const password = $('#cloud-password').value;
+  try {
+    const result = await sendCloudRequest('/auth/v1/token?grant_type=password', {
+      method: 'POST',
+      body: { email, password }
+    });
+    saveCloudSession(result);
+    $('#cloud-password').value = '';
+    await renderCloudWorkspace();
+  } catch (error) {
+    console.error('Cloud sign-in failed.', error);
+    setCloudStatus(`Sign-in failed: ${error.message}`, 'Sign-in failed');
+  }
+}
+
+async function setCloudPassword(event) {
+  event.preventDefault();
+  const password = $('#cloud-new-password').value;
+  if (password !== $('#cloud-confirm-password').value) {
+    setCloudStatus('The password fields do not match.', 'Check password');
+    return;
+  }
+  if (password.length < 12) {
+    setCloudStatus('Use a password with at least 12 characters.', 'Check password');
+    return;
+  }
+  const session = getCloudSession();
+  if (!session) {
+    setCloudStatus('The account link has expired. Request a new invite or recovery link.', 'Link expired');
+    return;
+  }
+  try {
+    await cloudRequest('/auth/v1/user', {
+      method: 'PUT',
+      body: { password }
+    });
+    const refreshedSession = getCloudSession();
+    if (!refreshedSession) throw new Error('The account session ended before the password update completed.');
+    refreshedSession.requiresPasswordUpdate = false;
+    sessionStorage.setItem(cloudSessionStorageKey, JSON.stringify(refreshedSession));
+    $('#cloud-set-password-form').reset();
+    await renderCloudWorkspace();
+    showToast('Account password updated.');
+  } catch (error) {
+    console.error('Cloud account password update failed.', error);
+    setCloudStatus(`Password could not be updated: ${error.message}`, 'Update failed');
+  }
+}
+
+async function signOutOfCloud() {
+  let revokeError = null;
+  if (getCloudSession()) {
+    try {
+      await cloudRequest('/auth/v1/logout', { method: 'POST' });
+    } catch (error) {
+      revokeError = error;
+      console.error('Remote cloud sign-out failed.', error);
+    }
+  }
+  sessionStorage.removeItem(cloudSessionStorageKey);
+  cloudContext = null;
+  $('#cloud-cohorts').replaceChildren();
+  renderCloudWorkspace();
+  if (revokeError) showToast(`Signed out on this device. Remote session revocation failed: ${revokeError.message}`);
+  else showToast('Signed out of the cloud workspace.');
+}
+
+async function createCloudCohort(event) {
+  event.preventDefault();
+  const name = $('#cloud-new-cohort-name').value.trim();
+  if (!name) return;
+  try {
+    await cloudRequest('/rest/v1/rpc/create_academy_cohort', { method: 'POST', body: { cohort_name: name } });
+    $('#cloud-new-cohort-name').value = '';
+    await renderCloudWorkspace();
+    showToast('Cohort created. Share its invite code with enrolled students.');
+  } catch (error) {
+    console.error('Cohort creation failed.', error);
+    setCloudStatus(`Cohort could not be created: ${error.message}`, 'Request failed');
+  }
+}
+
+async function updateCloudProfile(event) {
+  event.preventDefault();
+  const displayName = $('#cloud-display-name').value.trim();
+  if (!displayName || displayName.length > 80) {
+    setCloudStatus('Enter a display name between 1 and 80 characters.', 'Invalid name');
+    return;
+  }
+  try {
+    const userId = getCloudSession()?.user.id;
+    if (!userId) throw new Error('Sign in before updating your class name.');
+    const params = new URLSearchParams({ user_id: `eq.${userId}` });
+    await cloudRequest(`/rest/v1/profiles?${params}`, {
+      method: 'PATCH',
+      body: { display_name: displayName },
+      prefer: 'return=minimal'
+    });
+    await renderCloudWorkspace();
+    showToast('Class display name updated.');
+  } catch (error) {
+    console.error('Cloud profile update failed.', error);
+    setCloudStatus(`Display name could not be updated: ${error.message}`, 'Update failed');
+  }
+}
+
+async function joinCloudCohort(event) {
+  event.preventDefault();
+  const code = $('#cloud-invite-code').value.trim();
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(code)) {
+    setCloudStatus('Enter the complete cohort invite code.', 'Invalid invite');
+    return;
+  }
+  try {
+    await cloudRequest('/rest/v1/rpc/join_academy_cohort', { method: 'POST', body: { invite_code: code } });
+    $('#cloud-invite-code').value = '';
+    await renderCloudWorkspace();
+    showToast('Joined the cohort.');
+  } catch (error) {
+    console.error('Joining the cohort failed.', error);
+    setCloudStatus(`Could not join the cohort: ${error.message}`, 'Request failed');
+  }
+}
+
+async function reviewCloudProject(event) {
+  const loadButton = event.target.closest('.cloud-project-load');
+  if (loadButton) {
+    loadCloudProjectToDevice(loadButton.dataset.cloudProject);
+    return;
+  }
+  const button = event.target.closest('.cloud-review-action');
+  if (!button || !cloudContext || !['approved', 'changes-requested'].includes(button.dataset.cloudStatus)) return;
+  button.disabled = true;
+  try {
+    const comment = $$('[data-cloud-comment]', $('#cloud-cohorts'))
+      .find(input => input.dataset.cloudComment === button.dataset.cloudProject)?.value.trim() || '';
+    const params = new URLSearchParams({ id: `eq.${button.dataset.cloudProject}` });
+    await cloudRequest(`/rest/v1/projects?${params}`, {
+      method: 'PATCH',
+      body: { status: button.dataset.cloudStatus, review_comment: comment },
+      prefer: 'return=minimal'
+    });
+    await renderCloudWorkspace();
+    showToast(`Cloud project marked ${button.dataset.cloudStatus}.`);
+  } catch (error) {
+    console.error('Cloud project review failed.', error);
+    setCloudStatus(`Review could not be saved: ${error.message}`, 'Review failed');
+    button.disabled = false;
+  }
+}
+
+function loadCloudProjectToDevice(projectId) {
+  if (!cloudContext || typeof projectId !== 'string') return false;
+  const session = getCloudSession();
+  const remote = cloudContext.cohorts
+    .flatMap(cohort => cohort.projects)
+    .find(project => project.id === projectId && project.owner_id === session?.user.id);
+  if (!remote || !remote.workspace || !Array.isArray(remote.rows)) {
+    showToast('This cloud project is unavailable or is not owned by your account.');
+    return false;
+  }
+  const existing = getSavedProjects().find(project => project.name === remote.name);
+  if (existing && !window.confirm('Replace the local project with this cloud copy? The existing local version will be kept as a revision.')) return false;
+  const revisions = [...(Array.isArray(existing?.revisions) ? existing.revisions : [])];
+  if (existing) {
+    revisions.push({
+      revisionId: `r-${Date.now()}`,
+      savedAt: existing.savedAt || new Date().toISOString(),
+      rows: existing.rows,
+      circuit: existing.circuit,
+      plc: existing.plc || null,
+      schedule: existing.schedule || null,
+      calculationInputs: existing.calculationInputs || null,
+      motorDesignInputs: existing.motorDesignInputs || null,
+      calculation: existing.calculation || null,
+      motorDesign: existing.motorDesign || null,
+      commissioning: existing.commissioning || getDefaultCommissioningSnapshot(),
+      standardsReview: existing.standardsReview || getDefaultStandardsReviewSnapshot(),
+      status: existing.status || 'draft'
+    });
+  }
+  const sessionProfile = cloudContext.profile;
+  const restored = {
+    name: remote.name,
+    savedAt: remote.updated_at || new Date().toISOString(),
+    rows: remote.rows,
+    circuit: remote.workspace.circuit,
+    plc: remote.workspace.plc || null,
+    schedule: remote.workspace.schedule || null,
+    calculationInputs: remote.workspace.calculationInputs || null,
+    motorDesignInputs: remote.workspace.motorDesignInputs || null,
+    commissioning: remote.workspace.commissioning || getDefaultCommissioningSnapshot(),
+    standardsReview: remote.workspace.standardsReview || getDefaultStandardsReviewSnapshot(),
+    owner: { name: sessionProfile.display_name || getCloudSession()?.user.email || 'Learner', role: sessionProfile.role },
+    cloudUserId: remote.owner_id,
+    cloudCohortId: remote.cohort_id,
+    status: normalizeProjectStatus(remote.status),
+    comments: remote.review_comment || '',
+    reviewHistory: Array.isArray(remote.review_history) ? remote.review_history.map(item => ({
+      action: item.action || 'Reviewed',
+      actor: item.actor_id === session?.user.id ? sessionProfile.display_name || 'You' : 'Instructor',
+      at: item.at || remote.updated_at,
+      comment: item.comment || ''
+    })) : [],
+    revisions: revisions.slice(-10),
+    resubmissionCount: Array.isArray(remote.review_history)
+      ? remote.review_history.filter(item => item.action === 'Resubmitted').length
+      : existing?.resubmissionCount || 0
+  };
+  try {
+    validateProjectWorkspace(restored);
+    const projects = getSavedProjects().filter(project => project.name !== restored.name);
+    projects.push(restored);
+    localStorage.setItem('dangote-academy-projects', JSON.stringify(projects));
+    projectsChangedDuringStartup = true;
+    persistProjects(projects);
+    refreshProjectList();
+    $('#project-list').value = restored.name;
+    renderRevisionControls(restored.name);
+    loadNamedProject();
+    renderReview();
+    showToast(`Cloud project loaded on this device: ${restored.name}`);
+    return true;
+  } catch (error) {
+    console.error('Cloud project could not be restored to this device.', error);
+    showToast('Cloud project is invalid and was not loaded.');
+    return false;
+  }
+}
+
+async function syncSubmittedProjectToCloud(project) {
+  try {
+    if (!getCloudConfiguration()) return;
+    const session = getCloudSession();
+    if (!session) {
+      showToast('Project submitted on this device. Sign in to send it to a class.');
+      return;
+    }
+    if (!cloudContext) await renderCloudWorkspace();
+    const membership = cloudContext?.cohorts.find(cohort =>
+      cohort.memberRole === 'student' && cohort.id === $('#cloud-submit-cohort').value
+    );
+    if (!membership) {
+      showToast('Project is saved locally. Join a class in Profile before sending it to the cloud.');
+      return;
+    }
+    const params = new URLSearchParams({
+      owner_id: `eq.${session.user.id}`,
+      cohort_id: `eq.${membership.id}`,
+      name: `eq.${project.name}`,
+      select: 'id,status'
+    });
+    const matches = await cloudRequest(`/rest/v1/projects?${params}`);
+    const workspace = {
+      circuit: project.circuit,
+      plc: project.plc,
+      schedule: project.schedule,
+      calculationInputs: project.calculationInputs,
+      motorDesignInputs: project.motorDesignInputs,
+      commissioning: project.commissioning,
+      standardsReview: project.standardsReview || getDefaultStandardsReviewSnapshot(),
+      learningProgress: getStudentProgressSummary()
+    };
+    let remoteProject = matches?.[0];
+    if (!remoteProject) {
+      const created = await cloudRequest('/rest/v1/projects', {
+        method: 'POST',
+        body: {
+          owner_id: session.user.id,
+          cohort_id: membership.id,
+          name: project.name,
+          rows: project.rows,
+          workspace,
+          status: 'draft'
+        },
+        prefer: 'return=representation'
+      });
+      remoteProject = created?.[0];
+    } else {
+      if (remoteProject.status === 'approved') {
+        throw new Error('This cloud project was approved. Save a new project name to submit a separate design.');
+      }
+      await cloudRequest(`/rest/v1/projects?id=eq.${encodeURIComponent(remoteProject.id)}`, {
+        method: 'PATCH',
+        body: { rows: project.rows, workspace, status: 'draft' },
+        prefer: 'return=minimal'
+      });
+    }
+    if (!remoteProject?.id) throw new Error('Cloud project was saved without a project identifier.');
+    await cloudRequest(`/rest/v1/projects?id=eq.${encodeURIComponent(remoteProject.id)}`, {
+      method: 'PATCH',
+      body: { status: 'submitted' },
+      prefer: 'return=minimal'
+    });
+    await renderCloudWorkspace();
+    showToast('Project submitted to the cloud class dashboard.');
+  } catch (error) {
+    console.error('Cloud project submission failed.', error);
+    showToast(`Project remains submitted on this device; cloud sync failed: ${error.message}`);
+  }
+}
+
 function getProfile() {
   try {
     const profile = JSON.parse(localStorage.getItem(profileStorageKey) || 'null');
@@ -596,11 +1343,31 @@ function getElectronicsDiagnosticsProgress() {
   }
 }
 
+function getPlcChallengeProgress() {
+  try {
+    const progress = JSON.parse(localStorage.getItem(plcChallengeStorageKey) || '{}');
+    return progress && typeof progress === 'object' && !Array.isArray(progress) ? progress : {};
+  } catch {
+    return {};
+  }
+}
+
+function getPlcTroubleshootingProgress() {
+  try {
+    const progress = JSON.parse(localStorage.getItem(plcTroubleshootingStorageKey) || '{}');
+    return progress && typeof progress === 'object' && !Array.isArray(progress) ? progress : {};
+  } catch {
+    return {};
+  }
+}
+
 function getStudentProgressSummary() {
   const lessons = getLessonProgress();
   const troubleshooting = getTroubleshootingProgress();
   const stationDiagnostics = getStationDiagnosticsProgress();
   const electronicsDiagnostics = getElectronicsDiagnosticsProgress();
+  const plcChallengesProgress = getPlcChallengeProgress();
+  const plcDiagnosticsProgress = getPlcTroubleshootingProgress();
   const projects = getSavedProjects();
   return {
     lessonsCompleted: guidedLessons.filter(lesson => lessons[lesson.id]).length,
@@ -614,6 +1381,12 @@ function getStudentProgressSummary() {
     electronicsScenariosCompleted: electronicsDiagnosticScenarios.filter(scenario => electronicsDiagnostics[scenario.id]?.completed).length,
     electronicsScenariosTotal: electronicsDiagnosticScenarios.length,
     electronicsAttempts: electronicsDiagnosticScenarios.reduce((total, scenario) => total + (Number(electronicsDiagnostics[scenario.id]?.attempts) || 0), 0),
+    plcChallengesCompleted: plcChallenges.filter(challenge => plcChallengesProgress[challenge.id]?.completed).length,
+    plcChallengesTotal: plcChallenges.length,
+    plcChallengesAttempts: plcChallenges.reduce((total, challenge) => total + (Number(plcChallengesProgress[challenge.id]?.attempts) || 0), 0),
+    plcScenariosCompleted: plcTroubleshootingCases.filter(scenario => plcDiagnosticsProgress[scenario.id]?.completed).length,
+    plcScenariosTotal: plcTroubleshootingCases.length,
+    plcScenarioAttempts: plcTroubleshootingCases.reduce((total, scenario) => total + (Number(plcDiagnosticsProgress[scenario.id]?.attempts) || 0), 0),
     projectsSubmitted: projects.filter(project => ['submitted', 'approved', 'changes-requested'].includes(project.status)).length,
     projectsApproved: projects.filter(project => project.status === 'approved').length
   };
@@ -640,6 +1413,7 @@ function renderDashboard() {
   const troubleshooting = getTroubleshootingProgress();
   const stationDiagnostics = getStationDiagnosticsProgress();
   const electronicsDiagnostics = getElectronicsDiagnosticsProgress();
+  const plcChallengeProgress = getPlcChallengeProgress();
   const completedLessons = guidedLessons.filter(lesson => lessons[lesson.id]).length;
   const completedScenarios = troubleshootingScenarios.filter((scenario, index) =>
     troubleshooting[scenario.id || `scenario-${index}`]?.completed
@@ -653,6 +1427,8 @@ function renderDashboard() {
   ).length;
   $('#dashboard-station-count').textContent = `Power-station cases ${completedStationCases} / ${stationDiagnosticScenarios.length}`;
   $('#dashboard-electronics-count').textContent = `Electronics cases ${electronicsDiagnosticScenarios.filter(scenario => electronicsDiagnostics[scenario.id]?.completed).length} / ${electronicsDiagnosticScenarios.length}`;
+  const plcCompleted = plcChallenges.filter(challenge => plcChallengeProgress[challenge.id]?.completed).length;
+  $('#dashboard-plc-count').textContent = `PLC challenges ${plcCompleted} / ${plcChallenges.length}`;
   $('#dashboard-boq-count').textContent = String($$('#boq-body tr').length);
 
   const events = projects
@@ -712,6 +1488,19 @@ function renderDashboard() {
       });
     }
   });
+  const plcProgress = getPlcChallengeProgress();
+  plcChallenges.forEach(challenge => {
+    const completed = plcProgress[challenge.id];
+    if (completed?.completed && Number.isFinite(Date.parse(completed.completedAt))) {
+      events.push({
+        title: `PLC challenge passed: ${challenge.title}`,
+        detail: `PLC training · ${Number(completed.attempts) || 0} attempt${Number(completed.attempts) === 1 ? '' : 's'}`,
+        at: completed.completedAt,
+        icon: 'fa-microchip',
+        color: 'violet-bg'
+      });
+    }
+  });
 
   events.sort((left, right) => Date.parse(right.at) - Date.parse(left.at));
   activity.innerHTML = events.length
@@ -722,7 +1511,7 @@ function renderDashboard() {
 function renderStudentProgressSummary() {
   const summary = getStudentProgressSummary();
   const target = $('#student-progress-summary');
-  if (target) target.innerHTML = `<span>Lessons <b>${summary.lessonsCompleted}/${summary.lessonsTotal}</b></span><span>Building scenarios <b>${summary.scenariosCompleted}/${summary.scenariosTotal}</b></span><span>Power-station cases <b>${summary.stationScenariosCompleted}/${summary.stationScenariosTotal}</b></span><span>Electronics cases <b>${summary.electronicsScenariosCompleted}/${summary.electronicsScenariosTotal}</b></span><span>Attempts <b>${summary.attempts + summary.stationAttempts + summary.electronicsAttempts}</b></span><span>Submitted <b>${summary.projectsSubmitted}</b></span>`;
+  if (target) target.innerHTML = `<span>Lessons <b>${summary.lessonsCompleted}/${summary.lessonsTotal}</b></span><span>Building scenarios <b>${summary.scenariosCompleted}/${summary.scenariosTotal}</b></span><span>Power-station cases <b>${summary.stationScenariosCompleted}/${summary.stationScenariosTotal}</b></span><span>Electronics cases <b>${summary.electronicsScenariosCompleted}/${summary.electronicsScenariosTotal}</b></span><span>PLC challenges <b>${summary.plcChallengesCompleted}/${summary.plcChallengesTotal}</b></span><span>PLC cases <b>${summary.plcScenariosCompleted}/${summary.plcScenariosTotal}</b></span><span>Attempts <b>${summary.attempts + summary.stationAttempts + summary.electronicsAttempts + summary.plcChallengesAttempts + summary.plcScenarioAttempts}</b></span><span>Submitted <b>${summary.projectsSubmitted}</b></span>`;
   renderDashboard();
 }
 
@@ -773,7 +1562,10 @@ function renderReview() {
   $('#review-projects').innerHTML = projects.length ? projects.map(project => {
     const history = Array.isArray(project.reviewHistory) ? project.reviewHistory : [];
     const status = normalizeProjectStatus(project.status, 'draft');
-    return `<article class="review-card" data-project="${escapeHtml(project.name)}"><div><strong>${escapeHtml(project.name)}</strong><small>Owner: ${escapeHtml(project.owner?.name || 'Local learner')} · Saved ${escapeHtml(new Date(project.savedAt).toLocaleString())}</small><span class="status ${status === 'approved' ? 'success' : status === 'changes-requested' ? 'danger' : status === 'submitted' ? 'info' : 'info'}">${escapeHtml(status)}</span><small>${project.resubmissionCount || 0} resubmission${project.resubmissionCount === 1 ? '' : 's'} · ${history.length} review event${history.length === 1 ? '' : 's'}</small>${project.comments ? `<p class="review-comment"><strong>Latest feedback:</strong> ${escapeHtml(project.comments)}</p>` : ''}<details><summary>Review history</summary><ul>${history.length ? history.map(event => `<li>${escapeHtml(event.action)} · ${escapeHtml(event.actor || 'Unknown')} · ${escapeHtml(new Date(event.at).toLocaleString())}${event.comment ? ` — ${escapeHtml(event.comment)}` : ''}</li>`).join('') : '<li>No history yet.</li>'}</ul></details></div><div class="review-actions"><textarea class="review-comment-input" data-role="instructor,administrator" data-name="${escapeHtml(project.name)}" maxlength="500" placeholder="Comment for the student" ${status !== 'submitted' ? 'disabled' : ''}>${escapeHtml(project.comments || '')}</textarea><div class="button-row" data-role="instructor,administrator"><button class="secondary-button review-action" data-name="${escapeHtml(project.name)}" data-status="approved" ${status !== 'submitted' ? 'disabled' : ''}>Approve</button><button class="secondary-button review-action" data-name="${escapeHtml(project.name)}" data-status="changes-requested" ${status !== 'submitted' ? 'disabled' : ''}>Request changes</button></div></div></article>`;
+    const plcSummary = project.plc
+      ? `<small>PLC: ${escapeHtml(plcPrograms[project.plc.programId]?.title || 'Saved ladder')} · ${project.plc.model.rungs.length} rung${project.plc.model.rungs.length === 1 ? '' : 's'}</small>`
+      : '';
+    return `<article class="review-card" data-project="${escapeHtml(project.name)}"><div><strong>${escapeHtml(project.name)}</strong><small>Owner: ${escapeHtml(project.owner?.name || 'Local learner')} · Saved ${escapeHtml(new Date(project.savedAt).toLocaleString())}</small>${plcSummary}<span class="status ${status === 'approved' ? 'success' : status === 'changes-requested' ? 'danger' : status === 'submitted' ? 'info' : 'info'}">${escapeHtml(status)}</span><small>${project.resubmissionCount || 0} resubmission${project.resubmissionCount === 1 ? '' : 's'} · ${history.length} review event${history.length === 1 ? '' : 's'}</small>${project.comments ? `<p class="review-comment"><strong>Latest feedback:</strong> ${escapeHtml(project.comments)}</p>` : ''}<details><summary>Review history</summary><ul>${history.length ? history.map(event => `<li>${escapeHtml(event.action)} · ${escapeHtml(event.actor || 'Unknown')} · ${escapeHtml(new Date(event.at).toLocaleString())}${event.comment ? ` — ${escapeHtml(event.comment)}` : ''}</li>`).join('') : '<li>No history yet.</li>'}</ul></details></div><div class="review-actions"><textarea class="review-comment-input" data-role="instructor,administrator" data-name="${escapeHtml(project.name)}" maxlength="500" placeholder="Comment for the student" ${status !== 'submitted' ? 'disabled' : ''}>${escapeHtml(project.comments || '')}</textarea><div class="button-row" data-role="instructor,administrator"><button class="secondary-button review-action" data-name="${escapeHtml(project.name)}" data-status="approved" ${status !== 'submitted' ? 'disabled' : ''}>Approve</button><button class="secondary-button review-action" data-name="${escapeHtml(project.name)}" data-status="changes-requested" ${status !== 'submitted' ? 'disabled' : ''}>Request changes</button></div></div></article>`;
   }).join('') : '<div class="review-empty-state" data-role="instructor,administrator"><p class="muted">Save a project to review it here.</p></div>';
   applyRoleControls();
   renderStudentProgressSummary();
@@ -830,7 +1622,8 @@ function submitNamedProject() {
     JSON.stringify(project.schedule || null) !== JSON.stringify(activeSnapshot.schedule) ||
     JSON.stringify(project.calculationInputs || null) !== JSON.stringify(activeSnapshot.calculationInputs) ||
     JSON.stringify(project.motorDesignInputs || null) !== JSON.stringify(activeSnapshot.motorDesignInputs) ||
-    JSON.stringify(project.commissioning || getDefaultCommissioningSnapshot()) !== JSON.stringify(activeSnapshot.commissioning)) {
+    JSON.stringify(project.commissioning || getDefaultCommissioningSnapshot()) !== JSON.stringify(activeSnapshot.commissioning) ||
+    JSON.stringify(project.standardsReview || getDefaultStandardsReviewSnapshot()) !== JSON.stringify(activeSnapshot.standardsReview)) {
     showToast('Save the latest project changes before submitting.');
     return false;
   }
@@ -860,6 +1653,7 @@ function submitNamedProject() {
   renderReview();
   renderStudentProgressSummary();
   showToast(resubmission ? 'Project resubmitted for instructor review.' : 'Project submitted for instructor review.');
+  syncSubmittedProjectToCloud(updated.find(item => item.name === name));
   return true;
 }
 
@@ -1289,6 +2083,160 @@ function getSavedCommissioningDraft() {
   }
 }
 
+function getDefaultStandardsReviewSnapshot() {
+  return {
+    jurisdiction: 'Nigeria',
+    standard: 'NESIS Regulations (proposed basis; applicability to be confirmed)',
+    edition: '2015',
+    amendments: '',
+    reviewerName: '',
+    reviewerQualification: '',
+    reviewerAuthorizationReference: '',
+    reviewerOrganization: '',
+    reviewDate: '',
+    sourceReferences: [
+      'NEMSA NESIS Regulations 2015: https://nemsa.gov.ng/wp-content/uploads/2019/11/NESIS-Regulations-2015-1-1.pdf',
+      'NEMSA standards, policies and guidelines: https://web.nemsa.gov.ng/regulations',
+      'ECOWAS document supplied for review: https://eis.ecowas.int/assets/front/medias/doc/media_20231011104957.pdf',
+      'Standards Organisation of Nigeria: https://son.gov.ng/',
+      'SON Digital Standards Platform: https://nnsdp.son.gov.ng/',
+      'NEMSA accreditation: https://nemsa.gov.ng/wp-content/uploads/2025/08/NEMSA_Accreditation_Certificate.pdf',
+      'NEMSA certification route: https://nemsa.gov.ng/competency-certification/'
+    ].join('\n'),
+    reviewerDeclaration: false,
+    checks: standardsReviewChecks.map(check => ({ id: check.id, status: 'not-reviewed', note: '' }))
+  };
+}
+
+function getStandardsReviewCrosswalk() {
+  return standardsReviewCrosswalk.map(item => ({ ...item }));
+}
+
+function isValidStandardsReviewSnapshot(review) {
+  const textLimits = {
+    jurisdiction: 120,
+    standard: 180,
+    edition: 100,
+    amendments: 300,
+    reviewerName: 100,
+    reviewerQualification: 160,
+    reviewerAuthorizationReference: 180,
+    reviewerOrganization: 140,
+    sourceReferences: 600
+  };
+  return Boolean(review && typeof review === 'object' && !Array.isArray(review) &&
+    Object.entries(textLimits).every(([key, maxLength]) =>
+      (key === 'reviewerAuthorizationReference' && review[key] === undefined ||
+        typeof review[key] === 'string' && review[key].length <= maxLength)) &&
+    typeof review.reviewerDeclaration === 'boolean' &&
+    typeof review.reviewDate === 'string' &&
+    (review.reviewDate === '' || /^\d{4}-\d{2}-\d{2}$/.test(review.reviewDate)) &&
+    Array.isArray(review.checks) && review.checks.length === standardsReviewChecks.length &&
+    new Set(review.checks.map(item => item?.id)).size === standardsReviewChecks.length &&
+    review.checks.every(item => standardsReviewChecks.some(check => check.id === item?.id) &&
+      standardsReviewStatuses.includes(item.status) &&
+      typeof item.note === 'string' && item.note.length <= 500));
+}
+
+function getStandardsReviewSnapshot() {
+  const checks = standardsReviewChecks.map(check => {
+    const card = $(`[data-standards-check="${check.id}"]`);
+    return {
+      id: check.id,
+      status: $('.standards-review-status', card)?.value || 'not-reviewed',
+      note: $('.standards-review-note', card)?.value || ''
+    };
+  });
+  return {
+    jurisdiction: $('#standards-jurisdiction')?.value.trim() || '',
+    standard: $('#standards-name')?.value.trim() || '',
+    edition: $('#standards-edition')?.value.trim() || '',
+    amendments: $('#standards-amendments')?.value.trim() || '',
+    reviewerName: $('#standards-reviewer-name')?.value.trim() || '',
+    reviewerQualification: $('#standards-reviewer-qualification')?.value.trim() || '',
+    reviewerAuthorizationReference: $('#standards-reviewer-authorization')?.value.trim() || '',
+    reviewerOrganization: $('#standards-reviewer-organization')?.value.trim() || '',
+    reviewDate: $('#standards-review-date')?.value || '',
+    sourceReferences: $('#standards-source-references')?.value.trim() || '',
+    reviewerDeclaration: $('#standards-reviewer-declaration')?.checked || false,
+    checks
+  };
+}
+
+function standardsReviewRecordStatus(review) {
+  const completeBasis = Boolean(review.jurisdiction && review.standard && review.edition);
+  const completeReviewer = Boolean(review.reviewerName && review.reviewerQualification &&
+    review.reviewerAuthorizationReference &&
+    review.reviewDate && review.reviewerDeclaration);
+  const resolvedChecks = review.checks.every(item =>
+    ['reviewed-acceptable', 'action-required', 'not-applicable'].includes(item.status));
+  if (!completeBasis || !completeReviewer || !resolvedChecks) return 'Record incomplete';
+  return 'External review recorded; compliance not verified by this app';
+}
+
+function renderStandardsReview(review = getDefaultStandardsReviewSnapshot()) {
+  if (!isValidStandardsReviewSnapshot(review)) throw new Error('Invalid standards review record.');
+  $('#standards-jurisdiction').value = review.jurisdiction;
+  $('#standards-name').value = review.standard;
+  $('#standards-edition').value = review.edition;
+  $('#standards-amendments').value = review.amendments;
+  $('#standards-reviewer-name').value = review.reviewerName;
+  $('#standards-reviewer-qualification').value = review.reviewerQualification;
+  $('#standards-reviewer-authorization').value = review.reviewerAuthorizationReference || '';
+  $('#standards-reviewer-organization').value = review.reviewerOrganization;
+  $('#standards-review-date').value = review.reviewDate;
+  $('#standards-source-references').value = review.sourceReferences;
+  $('#standards-reviewer-declaration').checked = review.reviewerDeclaration;
+  $('#standards-crosswalk-list').innerHTML = standardsReviewCrosswalk.map(item =>
+    `<article class="standards-crosswalk-item"><h5>${escapeHtml(item.topic)}</h5><p><strong>Current model:</strong> ${escapeHtml(item.model)}</p><p><strong>Source pointers:</strong> ${escapeHtml(item.references)}</p><p><strong>Reviewer action:</strong> ${escapeHtml(item.review)}</p><span class="demo-note">Review required; no compliance conclusion</span></article>`
+  ).join('');
+  const byId = new Map(review.checks.map(item => [item.id, item]));
+  $('#standards-review-checks').innerHTML = standardsReviewChecks.map(check => {
+    const item = byId.get(check.id);
+    return `<article class="standards-review-card" data-standards-check="${check.id}"><div><h4>${escapeHtml(check.title)}</h4><p>${escapeHtml(check.description)}</p></div><label>Reviewer-entered outcome<select class="standards-review-status"><option value="not-reviewed" ${item.status === 'not-reviewed' ? 'selected' : ''}>Not reviewed</option><option value="reviewed-acceptable" ${item.status === 'reviewed-acceptable' ? 'selected' : ''}>Reviewer marked acceptable</option><option value="action-required" ${item.status === 'action-required' ? 'selected' : ''}>Action required</option><option value="awaiting-evidence" ${item.status === 'awaiting-evidence' ? 'selected' : ''}>Awaiting evidence</option><option value="not-applicable" ${item.status === 'not-applicable' ? 'selected' : ''}>Not applicable (reviewer decision)</option></select></label><label>Evidence reference or action note<textarea class="standards-review-note" maxlength="500" rows="2" placeholder="Use a drawing, calculation, test record, or action reference; avoid confidential data">${escapeHtml(item.note)}</textarea></label></article>`;
+  }).join('');
+  updateStandardsReviewStatus();
+}
+
+function updateStandardsReviewStatus() {
+  const review = getStandardsReviewSnapshot();
+  const counts = standardsReviewStatuses.reduce((result, status) => {
+    result[status] = review.checks.filter(item => item.status === status).length;
+    return result;
+  }, {});
+  const done = counts['reviewed-acceptable'] + counts['action-required'] + counts['not-applicable'];
+  $('#standards-review-progress').textContent =
+    `${done} / ${standardsReviewChecks.length} topics recorded · ${counts['action-required']} actions · ${counts['awaiting-evidence']} awaiting evidence`;
+  $('#standards-review-record-status').textContent = standardsReviewRecordStatus(review);
+}
+
+function persistStandardsReviewDraft() {
+  const review = getStandardsReviewSnapshot();
+  localStorage.setItem(standardsReviewStorageKey, JSON.stringify(review));
+  updateStandardsReviewStatus();
+}
+
+function restoreStandardsReview(review) {
+  const restored = review || getDefaultStandardsReviewSnapshot();
+  if (!isValidStandardsReviewSnapshot(restored)) throw new Error('Invalid standards review record.');
+  renderStandardsReview(restored);
+  persistStandardsReviewDraft();
+}
+
+function getSavedStandardsReviewDraft() {
+  const saved = localStorage.getItem(standardsReviewStorageKey);
+  if (!saved) return getDefaultStandardsReviewSnapshot();
+  try {
+    const review = JSON.parse(saved);
+    if (!isValidStandardsReviewSnapshot(review)) throw new Error('Saved standards review has an unsupported format.');
+    return review;
+  } catch (error) {
+    console.error('Saved standards review could not be restored.', error);
+    showToast('Saved standards review data is invalid; a new review record was opened.');
+    return getDefaultStandardsReviewSnapshot();
+  }
+}
+
 function calculateLoad(event) {
   event?.preventDefault();
   clearEngineeringPlot('load-sizing-plot', 'Enter valid load inputs to plot the design current.');
@@ -1441,6 +2389,85 @@ function getSavedProjects() {
   }
 }
 
+function getPlcSnapshot() {
+  return JSON.parse(JSON.stringify({
+    schemaVersion: 1,
+    programId: plcProgramId,
+    model: plcModel || clonePlcProgram(plcPrograms[plcProgramId]),
+    inputs: plcInputs,
+    outputs: plcOutputs,
+    analogInputs: plcAnalogInputs,
+    analogOutputs: plcAnalogOutputs,
+    runtimeState: plcRuntimeState,
+    scanCount: plcScanCount
+  }));
+}
+
+function validatePlcSnapshot(snapshot) {
+  const rungs = Array.isArray(snapshot?.model?.rungs) ? snapshot.model.rungs : [];
+  const timerPresets = Object.fromEntries(rungs.filter(rung => rung?.timer)
+    .map(rung => [rung.timer.tag, rung.timer.presetScans]));
+  const counterPresets = Object.fromEntries(rungs.filter(rung => rung?.counter)
+    .map(rung => [rung.counter.tag, rung.counter.preset]));
+  const runtimeState = snapshot?.runtimeState || { timers: {}, counters: {} };
+  if (!snapshot || snapshot.schemaVersion !== 1 ||
+    !Object.prototype.hasOwnProperty.call(plcPrograms, snapshot.programId) ||
+    !window.DangoteAcademyCore.validatePlcProgram(snapshot.model).valid ||
+    !snapshot.inputs || typeof snapshot.inputs !== 'object' || Array.isArray(snapshot.inputs) ||
+    Object.keys(snapshot.inputs).some(tag => !plcInputCatalog.some(input => input.tag === tag)) ||
+    Object.values(snapshot.inputs).some(value => typeof value !== 'boolean') ||
+    !snapshot.outputs || typeof snapshot.outputs !== 'object' || Array.isArray(snapshot.outputs) ||
+    Object.keys(snapshot.outputs).some(tag => !plcOutputCatalog.some(output => output.tag === tag)) ||
+    Object.values(snapshot.outputs).some(value => typeof value !== 'boolean') ||
+    !snapshot.analogInputs || typeof snapshot.analogInputs !== 'object' || Array.isArray(snapshot.analogInputs) ||
+    Object.entries(snapshot.analogInputs).some(([tag, value]) =>
+      !plcAnalogInputCatalog.some(input => input.tag === tag) || !Number.isFinite(value) || value < 0 || value > 100) ||
+    !snapshot.analogOutputs || typeof snapshot.analogOutputs !== 'object' || Array.isArray(snapshot.analogOutputs) ||
+    Object.entries(snapshot.analogOutputs).some(([tag, value]) =>
+      tag !== 'AQ0' || !Number.isFinite(value) || value < 0 || value > 100) ||
+    !runtimeState.timers || typeof runtimeState.timers !== 'object' || Array.isArray(runtimeState.timers) ||
+    Object.entries(runtimeState.timers).some(([tag, state]) =>
+      !Object.prototype.hasOwnProperty.call(timerPresets, tag) || !state ||
+      !Number.isInteger(state.elapsedScans) || state.elapsedScans < 0 ||
+      state.elapsedScans > timerPresets[tag] || typeof state.done !== 'boolean' ||
+      state.done !== (state.elapsedScans >= timerPresets[tag])) ||
+    !runtimeState.counters || typeof runtimeState.counters !== 'object' || Array.isArray(runtimeState.counters) ||
+    Object.entries(runtimeState.counters).some(([tag, state]) =>
+      !Object.prototype.hasOwnProperty.call(counterPresets, tag) || !state ||
+      !Number.isInteger(state.count) || state.count < 0 || state.count > counterPresets[tag] ||
+      typeof state.previousRung !== 'boolean') ||
+    !Number.isInteger(snapshot.scanCount) || snapshot.scanCount < 0) {
+    throw new Error('Invalid PLC workspace.');
+  }
+  const stateCheck = window.DangoteAcademyCore.calculatePlcScan(
+    snapshot.model, snapshot.inputs, snapshot.outputs, runtimeState,
+    snapshot.analogInputs
+  );
+  if (!stateCheck.valid) throw new Error(stateCheck.error);
+}
+
+function restorePlcSnapshot(snapshot) {
+  validatePlcSnapshot(snapshot);
+  stopPlcScans();
+  plcProgramId = snapshot.programId;
+  plcModel = clonePlcProgram(snapshot.model);
+  plcInputs = Object.fromEntries(plcInputCatalog.map(input =>
+    [input.tag, snapshot.inputs[input.tag] ?? input.initial]));
+  plcOutputs = Object.fromEntries(plcOutputCatalog.map(output =>
+    [output.tag, snapshot.outputs[output.tag] === true]));
+  plcAnalogInputs = Object.fromEntries(plcAnalogInputCatalog.map(input =>
+    [input.tag, Number.isFinite(snapshot.analogInputs[input.tag]) ? snapshot.analogInputs[input.tag] : input.initial]));
+  plcAnalogOutputs = { AQ0: Number.isFinite(snapshot.analogOutputs.AQ0) ? snapshot.analogOutputs.AQ0 : 0 };
+  plcRuntimeState = clonePlcProgram(snapshot.runtimeState || { timers: {}, counters: {} });
+  plcScanCount = snapshot.scanCount;
+  plcRungStates = [];
+  plcTrendSamples = [];
+  plcFault = 'none';
+  $('#plc-fault').value = 'none';
+  renderPlcWorkspace();
+  savePlcState();
+}
+
 function openProjectDatabase() {
     return new Promise((resolve, reject) => {
       if (!window.indexedDB) {
@@ -1489,10 +2516,22 @@ async function restoreProjectsFromDatabase() {
           database.close();
         }
         if (projectsChangedDuringStartup) return;
-        const localProjects = getSavedProjects();
-        if (localProjects.length) {
+        const localSnapshot = localStorage.getItem('dangote-academy-projects');
+        let localProjects = null;
+        if (localSnapshot !== null) {
+          try {
+            localProjects = JSON.parse(localSnapshot);
+            if (!Array.isArray(localProjects)) throw new Error('Saved project list is not an array.');
+            localProjects.forEach(validateProjectWorkspace);
+          } catch (error) {
+            console.error('Local project snapshot could not be restored; checking IndexedDB.', error);
+            localProjects = null;
+          }
+        }
+        if (localProjects !== null) {
           await persistProjects(localProjects);
         } else if (databaseProjects.length) {
+          databaseProjects.forEach(validateProjectWorkspace);
           localStorage.setItem('dangote-academy-projects', JSON.stringify(databaseProjects));
           refreshProjectList();
           renderRevisionControls();
@@ -1509,12 +2548,14 @@ function projectSnapshot(name) {
       savedAt: new Date().toISOString(),
       rows: getBOQRows(),
       circuit: serialiseCircuit(),
+      plc: getPlcSnapshot(),
       schedule: getLoadScheduleSnapshot(),
       calculationInputs: getLoadSizingInputs(),
       motorDesignInputs: getMotorDesignInputs(),
       calculation: lastCalculation,
       motorDesign: lastMotorDesign,
       commissioning: getCommissioningSnapshot(),
+      standardsReview: getStandardsReviewSnapshot(),
       owner: getProfile(),
       status: 'draft',
       comments: '',
@@ -1535,6 +2576,7 @@ function validateProjectWorkspace(project) {
     throw new Error('Invalid project BOQ.');
   }
   validateCircuitData(project.circuit);
+  if (project.plc) validatePlcSnapshot(project.plc);
   if (project.schedule && !isValidLoadScheduleSnapshot(project.schedule)) {
     throw new Error('Invalid project load schedule.');
   }
@@ -1546,6 +2588,9 @@ function validateProjectWorkspace(project) {
   }
   if (project.commissioning && !isValidCommissioningSnapshot(project.commissioning)) {
     throw new Error('Invalid project installation record.');
+  }
+  if (project.standardsReview && !isValidStandardsReviewSnapshot(project.standardsReview)) {
+    throw new Error('Invalid project standards review record.');
   }
 }
 
@@ -1575,7 +2620,9 @@ function saveNamedProject() {
     JSON.stringify(previous.schedule || null) !== JSON.stringify(project.schedule) ||
     JSON.stringify(previous.calculationInputs || null) !== JSON.stringify(project.calculationInputs) ||
     JSON.stringify(previous.motorDesignInputs || null) !== JSON.stringify(project.motorDesignInputs) ||
-    JSON.stringify(previous.commissioning || getDefaultCommissioningSnapshot()) !== JSON.stringify(project.commissioning)
+    JSON.stringify(previous.commissioning || getDefaultCommissioningSnapshot()) !== JSON.stringify(project.commissioning) ||
+    JSON.stringify(previous.standardsReview || getDefaultStandardsReviewSnapshot()) !== JSON.stringify(project.standardsReview) ||
+    JSON.stringify(previous.plc || null) !== JSON.stringify(project.plc)
   ));
   project.status = changed && ['submitted', 'approved'].includes(previous?.status)
     ? 'draft'
@@ -1591,12 +2638,14 @@ function saveNamedProject() {
       savedAt: previous.savedAt || project.savedAt,
       rows: previous.rows || [],
       circuit: previous.circuit || { version: 2, components: [], connections: [] },
+      plc: previous.plc || null,
       schedule: previous.schedule || null,
       calculationInputs: previous.calculationInputs || null,
       motorDesignInputs: previous.motorDesignInputs || null,
       calculation: previous.calculation || null,
       motorDesign: previous.motorDesign || null,
       commissioning: previous.commissioning || getDefaultCommissioningSnapshot(),
+      standardsReview: previous.standardsReview || getDefaultStandardsReviewSnapshot(),
       status: previous.status || 'draft'
     });
     if (['submitted', 'approved'].includes(previous.status)) {
@@ -1659,13 +2708,15 @@ function compareProjectRevisions() {
     calculationChanged: JSON.stringify(project.calculationInputs || null) !== JSON.stringify(target.calculationInputs || null),
     motorDesignChanged: JSON.stringify(project.motorDesignInputs || null) !== JSON.stringify(target.motorDesignInputs || null),
     commissioningChanged: JSON.stringify(project.commissioning || getDefaultCommissioningSnapshot()) !== JSON.stringify(target.commissioning || getDefaultCommissioningSnapshot()),
+    standardsReviewChanged: JSON.stringify(project.standardsReview || getDefaultStandardsReviewSnapshot()) !== JSON.stringify(target.standardsReview || getDefaultStandardsReviewSnapshot()),
+    plcChanged: JSON.stringify(project.plc || null) !== JSON.stringify(target.plc || null),
     reviewStatusChanged: (project.status || 'draft') !== (target.status || 'draft'),
     boqItems: `${targetRows.length} → ${currentRows.length}`,
     components: `${targetComponents.length} → ${currentComponents.length}`,
     connections: `${targetConnections.length} → ${currentConnections.length}`,
     loads: `${target.schedule?.rows?.length || 0} → ${project.schedule?.rows?.length || 0}`
   };
-  output.textContent = `Revision ${index + 1}: ${result.boqChanged ? 'BOQ changed' : 'BOQ unchanged'} · ${result.circuitChanged ? 'Circuit changed' : 'Circuit unchanged'} · ${result.scheduleChanged ? 'Load schedule changed' : 'Load schedule unchanged'} · ${result.calculationChanged ? 'Sizing inputs changed' : 'Sizing inputs unchanged'} · ${result.motorDesignChanged ? 'Motor design changed' : 'Motor design unchanged'} · ${result.commissioningChanged ? 'Installation record changed' : 'Installation record unchanged'} · review status ${result.reviewStatusChanged ? 'changed' : 'unchanged'} · items ${result.boqItems} · components ${result.components} · connections ${result.connections} · schedule rows ${result.loads}`;
+  output.textContent = `Revision ${index + 1}: ${result.boqChanged ? 'BOQ changed' : 'BOQ unchanged'} · ${result.circuitChanged ? 'Circuit changed' : 'Circuit unchanged'} · ${result.plcChanged ? 'PLC program changed' : 'PLC program unchanged'} · ${result.scheduleChanged ? 'Load schedule changed' : 'Load schedule unchanged'} · ${result.calculationChanged ? 'Sizing inputs changed' : 'Sizing inputs unchanged'} · ${result.motorDesignChanged ? 'Motor design changed' : 'Motor design unchanged'} · ${result.commissioningChanged ? 'Installation record changed' : 'Installation record unchanged'} · standards review ${result.standardsReviewChanged ? 'changed' : 'unchanged'} · review status ${result.reviewStatusChanged ? 'changed' : 'unchanged'} · items ${result.boqItems} · components ${result.components} · connections ${result.connections} · schedule rows ${result.loads}`;
   return result;
 }
 
@@ -1701,6 +2752,8 @@ function restoreProjectRevision() {
   if (revision.motorDesignInputs) restoreMotorDesignInputs(revision.motorDesignInputs);
   else calculateMotorFeeder();
   restoreCommissioningChecks(revision.commissioning || getDefaultCommissioningSnapshot());
+  restoreStandardsReview(revision.standardsReview || getDefaultStandardsReviewSnapshot());
+  if (revision.plc) restorePlcSnapshot(revision.plc);
   showToast(`Revision ${index + 1} restored to the workspace. Save the project to keep it.`);
 }
 
@@ -1729,6 +2782,8 @@ function loadNamedProject() {
   if (project.motorDesignInputs) restoreMotorDesignInputs(project.motorDesignInputs);
   else calculateMotorFeeder();
   restoreCommissioningChecks(project.commissioning || getDefaultCommissioningSnapshot());
+  restoreStandardsReview(project.standardsReview || getDefaultStandardsReviewSnapshot());
+  if (project.plc) restorePlcSnapshot(project.plc);
   showToast(`Project loaded: ${project.name}`);
 }
 
@@ -1756,12 +2811,149 @@ function deleteNamedProject() {
 
 function exportProject() {
   const name = $('#project-name').value.trim() || 'Electrical Academy Project';
-  const blob = new Blob([JSON.stringify(projectSnapshot(name), null, 2)], { type: 'application/json' });
+  const project = projectSnapshot(name);
+  const saved = getSavedProjects().find(item => item.name === name);
+  if (saved) {
+    project.status = saved.status || 'draft';
+    project.comments = saved.comments || '';
+    project.reviewHistory = saved.reviewHistory || [];
+    project.revisions = saved.revisions || [];
+    project.resubmissionCount = saved.resubmissionCount || 0;
+  }
+  const blob = new Blob([JSON.stringify(project, null, 2)], { type: 'application/json' });
   const link = document.createElement('a');
   link.href = URL.createObjectURL(blob);
   link.download = `${name.replace(/[^a-z0-9]+/gi, '-').toLowerCase() || 'project'}.json`;
   link.click();
   URL.revokeObjectURL(link.href);
+}
+
+function createWorkspaceBackup() {
+  const storage = {};
+  workspaceBackupStorageKeys.forEach(key => {
+    const value = localStorage.getItem(key);
+    if (value !== null) storage[key] = value;
+  });
+  return {
+    format: 'dangote-electrical-academy-backup',
+    schemaVersion: 1,
+    exportedAt: new Date().toISOString(),
+    storage
+  };
+}
+
+function validateWorkspaceBackup(backup) {
+  if (!backup || backup.format !== 'dangote-electrical-academy-backup' ||
+    backup.schemaVersion !== 1 || !backup.storage ||
+    typeof backup.storage !== 'object' || Array.isArray(backup.storage)) {
+    throw new Error('Unsupported or invalid workspace backup.');
+  }
+  const allowedKeys = new Set(workspaceBackupStorageKeys);
+  Object.entries(backup.storage).forEach(([key, value]) => {
+    if (!allowedKeys.has(key) || typeof value !== 'string') {
+      throw new Error('Workspace backup contains an unsupported data entry.');
+    }
+    JSON.parse(value);
+  });
+  const projects = backup.storage['dangote-academy-projects'];
+  if (projects !== undefined) {
+    const parsedProjects = JSON.parse(projects);
+    if (!Array.isArray(parsedProjects)) throw new Error('Workspace project list is invalid.');
+    parsedProjects.forEach(project => {
+      if (!project || typeof project.name !== 'string' || !project.name.trim()) {
+        throw new Error('Workspace contains a project with an invalid name.');
+      }
+      validateProjectWorkspace(project);
+    });
+  }
+  return backup;
+}
+
+function applyWorkspaceBackup(backup) {
+  validateWorkspaceBackup(backup);
+  const previous = Object.fromEntries(workspaceBackupStorageKeys.map(key => [key, localStorage.getItem(key)]));
+  try {
+    workspaceBackupStorageKeys.forEach(key => localStorage.removeItem(key));
+    Object.entries(backup.storage).forEach(([key, value]) => localStorage.setItem(key, value));
+  } catch (error) {
+    try {
+      workspaceBackupStorageKeys.forEach(key => {
+        if (previous[key] === null) localStorage.removeItem(key);
+        else localStorage.setItem(key, previous[key]);
+      });
+    } catch (rollbackError) {
+      error.rollbackError = rollbackError;
+      console.error('Previous local data could not be fully restored after a backup failure.', rollbackError);
+    }
+    throw error;
+  }
+}
+
+function exportWorkspaceBackup() {
+  try {
+    const backup = createWorkspaceBackup();
+    const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    link.href = url;
+    link.download = `dangote-academy-backup-${new Date().toISOString().slice(0, 10)}.json`;
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    showToast('Full offline backup exported.');
+    return backup;
+  } catch (error) {
+    console.error('Workspace backup export failed.', error);
+    showToast('Backup could not be created. Check the browser storage and try again.');
+    return null;
+  }
+}
+
+function restoreWorkspaceBackup(event) {
+  const input = event.target;
+  const file = input.files?.[0];
+  if (!file) return;
+  if (file.size > 25 * 1024 * 1024) {
+    showToast('Backup is too large to restore (maximum 25 MB).');
+    input.value = '';
+    return;
+  }
+  const reader = new FileReader();
+  reader.onerror = () => {
+    console.error('Workspace backup file could not be read.', reader.error);
+    showToast('Backup file could not be read.');
+    input.value = '';
+  };
+  reader.onload = async () => {
+    let backup;
+    try {
+      backup = validateWorkspaceBackup(JSON.parse(reader.result));
+    } catch (error) {
+      console.error('Workspace backup failed validation.', error);
+      showToast('Backup is invalid or from an unsupported version; no data was changed.');
+      input.value = '';
+      return;
+    }
+    if (!window.confirm('Restoring this backup replaces this device’s academy data. Export a backup of the current data first if you may need it. Continue?')) {
+      input.value = '';
+      return;
+    }
+
+    try {
+      applyWorkspaceBackup(backup);
+      projectsChangedDuringStartup = true;
+      await persistProjects(JSON.parse(backup.storage['dangote-academy-projects'] || '[]'));
+      showToast('Backup restored. Reloading the workspace.');
+      window.location.reload();
+    } catch (error) {
+      console.error('Workspace backup restore failed.', error);
+      showToast(error.rollbackError
+        ? 'Backup failed and rollback was incomplete. Check this device data before continuing.'
+        : 'Backup could not be restored; the previous local data was kept.');
+    } finally {
+      input.value = '';
+    }
+  };
+  reader.readAsText(file);
 }
 
 function buildEngineeringReport() {
@@ -1783,6 +2975,7 @@ function buildEngineeringReport() {
     schemaVersion: 1,
     reportType: 'unified-engineering-report',
     exportedAt: new Date().toISOString(),
+    engineeringNotice: 'Educational estimates only; no qualified engineering or standards-compliance validation has been completed.',
     project: {
       name: projectName,
       owner: getProfile(),
@@ -1790,6 +2983,7 @@ function buildEngineeringReport() {
       boq: getBOQRows(),
       total: $('#boq-total')?.textContent || '0.00',
       circuit: serialiseCircuit(),
+      plc: getPlcSnapshot(),
       scheduleInputs: getLoadScheduleSnapshot(),
       circuitValidation: {
         valid: circuitValid,
@@ -1799,6 +2993,11 @@ function buildEngineeringReport() {
       schedule: scheduleResult.valid ? scheduleResult : null,
       motorDesign: lastMotorDesign ? { inputs: lastMotorDesign.inputs, estimate: lastMotorDesign } : null,
       commissioning: getCommissioningSnapshot(),
+      standardsReview: {
+        ...getStandardsReviewSnapshot(),
+        recordStatus: standardsReviewRecordStatus(getStandardsReviewSnapshot()),
+        formulaCrosswalk: standardsReviewCrosswalk
+      },
       commissioningSummary: {
         total: commissioningChecks.length,
         recorded: getCommissioningSnapshot().filter(item => item.status === 'recorded').length,
@@ -1816,6 +3015,8 @@ function buildEngineeringReport() {
       troubleshooting: getTroubleshootingProgress(),
       stationDiagnostics: getStationDiagnosticsProgress(),
       electronicsDiagnostics: getElectronicsDiagnosticsProgress(),
+      plcChallenges: getPlcChallengeProgress(),
+      plcTroubleshooting: getPlcTroubleshootingProgress(),
       progress
     }
   };
@@ -1826,10 +3027,11 @@ function exportEngineeringReport() {
   const name = report.project.name.replace(/[^a-z0-9]+/gi, '-').toLowerCase() || 'engineering-report';
   const blob = new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' });
   const link = document.createElement('a');
-  link.href = URL.createObjectURL(blob);
+  const url = URL.createObjectURL(blob);
+  link.href = url;
   link.download = `${name}-engineering-report.json`;
   link.click();
-  URL.revokeObjectURL(link.href);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
   showToast('Unified engineering report exported.');
   return report;
 }
@@ -1914,6 +3116,189 @@ function exportPdf() {
   const data = $$('#boq-body tr').map(row => [...row.cells].slice(0, 6).map((cell, index) => index === 2 ? $('.qty-input', cell).value : cell.textContent.trim()));
   doc.autoTable({ startY: 48, head: [['Description', 'Category', 'Qty', 'Unit', 'Unit price', 'Total']], body: data, theme: 'striped', headStyles: { fillColor: [16, 41, 66] }, styles: { fontSize: 8 } });
   doc.setFontSize(11); doc.setTextColor(16, 41, 66); doc.text(`Total estimate: N ${$('#boq-total').textContent}`, 14, doc.lastAutoTable.finalY + 10); doc.save('Electrical_BOQ_Report.pdf');
+}
+
+function addEngineeringPdfTable(doc, title, rows, columns = ['Item', 'Details']) {
+  let startY = doc.lastAutoTable ? doc.lastAutoTable.finalY + 10 : 42;
+  if (startY > 260) {
+    doc.addPage();
+    startY = 25;
+  }
+  doc.setFontSize(12);
+  doc.setTextColor(16, 41, 66);
+  doc.text(title, 14, startY);
+  doc.autoTable({
+    startY: startY + 4,
+    head: [columns],
+    body: rows.length ? rows : [['No data', 'Not recorded']],
+    theme: 'striped',
+    headStyles: { fillColor: [16, 41, 66] },
+    styles: { fontSize: 8, cellPadding: 2, overflow: 'linebreak' },
+    margin: { left: 14, right: 14 }
+  });
+}
+
+function reportRows(value, prefix = '', depth = 0) {
+  if (depth > 2 || value === null || value === undefined) return [];
+  if (Array.isArray(value)) {
+    return value.slice(0, 12).map((item, index) => [
+      prefix ? `${prefix} ${index + 1}` : `Item ${index + 1}`,
+      typeof item === 'object' ? JSON.stringify(item) : String(item)
+    ]);
+  }
+  if (typeof value !== 'object') return [[prefix || 'Result', String(value)]];
+  return Object.entries(value).flatMap(([key, item]) => {
+    const label = prefix ? `${prefix} · ${key}` : key;
+    if (item && typeof item === 'object') return reportRows(item, label, depth + 1);
+    return [[label, item === null ? 'Not available' : String(item)]];
+  }).slice(0, 24);
+}
+
+function addCircuitDiagramPage(doc, circuit) {
+  doc.addPage();
+  doc.setFontSize(12);
+  doc.setTextColor(16, 41, 66);
+  doc.text('Circuit layout (simplified, not to scale)', 14, 24);
+  const components = circuit?.components || [];
+  const connections = circuit?.connections || [];
+  if (!components.length) {
+    doc.setFontSize(10);
+    doc.text('No circuit components are recorded in this project.', 14, 40);
+    return;
+  }
+  const lefts = components.map(item => Number(item.left) || 0);
+  const tops = components.map(item => Number(item.top) || 0);
+  const minLeft = Math.min(...lefts);
+  const maxLeft = Math.max(...lefts);
+  const minTop = Math.min(...tops);
+  const maxTop = Math.max(...tops);
+  const positions = new Map(components.map(item => [item.id, {
+    x: maxLeft === minLeft ? 105 : 22 + ((Number(item.left) - minLeft) / (maxLeft - minLeft)) * 166,
+    y: maxTop === minTop ? 130 : 50 + ((Number(item.top) - minTop) / (maxTop - minTop)) * 175
+  }]));
+  const conductorColors = {
+    line: [128, 79, 37],
+    'phase-a': [128, 79, 37],
+    'phase-b': [35, 91, 157],
+    'phase-c': [105, 61, 143],
+    neutral: [30, 116, 186],
+    earth: [48, 125, 66]
+  };
+  connections.forEach(connection => {
+    const from = positions.get(connection.from);
+    const to = positions.get(connection.to);
+    if (!from || !to) return;
+    const color = conductorColors[connection.conductor] || [90, 100, 110];
+    doc.setDrawColor(...color);
+    doc.setLineWidth(1);
+    doc.line(from.x, from.y, to.x, to.y);
+  });
+  components.forEach((component, index) => {
+    const point = positions.get(component.id);
+    doc.setDrawColor(16, 41, 66);
+    doc.setFillColor(255, 255, 255);
+    doc.rect(point.x - 19, point.y - 10, 38, 20, 'FD');
+    doc.setFontSize(7);
+    doc.setTextColor(16, 41, 66);
+    doc.text(String(component.type || `Part ${index + 1}`).slice(0, 15), point.x, point.y + 2, { align: 'center' });
+  });
+  doc.setFontSize(8);
+  doc.setTextColor(85, 95, 105);
+  doc.text(`${components.length} components | ${connections.length} connections`, 14, 260);
+  doc.text('Conductor colors are illustrative only; this diagram is not an installation drawing.', 14, 267);
+}
+
+function exportEngineeringReportPdf() {
+  if (!window.jspdf?.jsPDF || typeof window.jspdf.jsPDF.API?.autoTable !== 'function') {
+    showToast('PDF export is unavailable because the bundled PDF libraries did not load.');
+    return false;
+  }
+  try {
+    const report = buildEngineeringReport();
+    const project = report.project;
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF();
+    doc.setTextColor(16, 41, 66);
+    doc.setFontSize(17);
+    doc.text('Dangote Electrical Academy', 14, 20);
+    doc.setFontSize(10);
+    doc.setTextColor(95, 105, 115);
+    doc.text('Unified engineering training report', 14, 28);
+    doc.text(`Project: ${project.name}`, 14, 35);
+    addEngineeringPdfTable(doc, 'Project and review', [
+      ['Owner', project.owner?.name || 'Not recorded'],
+      ['Role', project.owner?.role || 'Not recorded'],
+      ['Status', project.status],
+      ['Exported', new Date(report.exportedAt).toLocaleString()],
+      ['BOQ estimate (NGN)', project.total],
+      ['Engineering validation', 'Not validated for standards compliance']
+    ]);
+    addEngineeringPdfTable(doc, 'Load and cable sizing', reportRows(project.calculation));
+    addEngineeringPdfTable(doc, 'Load schedule', [
+      ...reportRows(project.schedule),
+      ['Validation', project.scheduleValidation.valid ? 'Valid in training model' : project.scheduleValidation.message || 'Incomplete']
+    ]);
+    addEngineeringPdfTable(doc, 'Motor feeder estimate', reportRows(project.motorDesign));
+    addEngineeringPdfTable(doc, 'Circuit validation', [
+      ['Result', project.circuitValidation.valid ? 'Valid in training model' : 'Not validated'],
+      ['Details', project.circuitValidation.message || 'No validation message recorded'],
+      ['Components', String(project.circuit?.components?.length || 0)],
+      ['Connections', String(project.circuit?.connections?.length || 0)]
+    ]);
+    addEngineeringPdfTable(doc, 'Bill of quantities',
+      project.boq.map(item => [
+        item.description,
+        `${item.category} | ${item.quantity} ${item.unit} | NGN ${Number(item.quantity * item.price).toLocaleString('en-NG')}`
+      ]));
+    addEngineeringPdfTable(doc, 'Installation record', project.commissioning.map(item => [
+      item.label || item.name || item.id || 'Check',
+      `${item.status || 'not-recorded'}${item.evidence ? ` | ${item.evidence}` : ''}`
+    ]));
+    addEngineeringPdfTable(doc, 'Standards basis and external review record', [
+      ['Record status', project.standardsReview.recordStatus],
+      ['Jurisdiction / authority', project.standardsReview.jurisdiction || 'Not recorded'],
+      ['Standard / code', project.standardsReview.standard || 'Not recorded'],
+      ['Edition / year', project.standardsReview.edition || 'Not recorded'],
+      ['Amendments', project.standardsReview.amendments || 'Not recorded'],
+      ['Reviewer', project.standardsReview.reviewerName || 'Not recorded'],
+      ['Qualification / registration', project.standardsReview.reviewerQualification || 'Not recorded'],
+      ['NEMSA certificate category / authorization reference', project.standardsReview.reviewerAuthorizationReference || 'Not recorded'],
+      ['Organization', project.standardsReview.reviewerOrganization || 'Not recorded'],
+      ['Review date', project.standardsReview.reviewDate || 'Not recorded'],
+      ['Reviewer self-declaration', project.standardsReview.reviewerDeclaration ? 'Provided; not verified by the app' : 'Not provided'],
+      ['Sources / evidence references', project.standardsReview.sourceReferences || 'Not recorded'],
+      ...project.standardsReview.checks.map(item => {
+        const check = standardsReviewChecks.find(entry => entry.id === item.id);
+        return [check?.title || item.id, `${item.status}${item.note ? ` | ${item.note}` : ''}`];
+      }),
+      ...project.standardsReview.formulaCrosswalk.map(item => [
+        `Review map: ${item.topic}`,
+        `${item.references} ${item.review}`
+      ])
+    ]);
+    addEngineeringPdfTable(doc, 'Learner progress', reportRows(report.learning.progress));
+    addEngineeringPdfTable(doc, 'Review history', (project.review || []).map(item => [
+      `${item.action} | ${item.actor || 'Unknown'}`,
+      `${item.at ? new Date(item.at).toLocaleString() : ''}${item.comment ? ` | ${item.comment}` : ''}`
+    ]));
+    addCircuitDiagramPage(doc, project.circuit);
+    const pageCount = doc.internal.getNumberOfPages();
+    for (let page = 1; page <= pageCount; page += 1) {
+      doc.setPage(page);
+      doc.setFontSize(7);
+      doc.setTextColor(110, 110, 110);
+      doc.text('Training estimates only - not certified engineering advice or authorization to install or energize.', 14, 289);
+      doc.text(`Page ${page} of ${pageCount}`, 196, 289, { align: 'right' });
+    }
+    const name = project.name.replace(/[^a-z0-9]+/gi, '-').toLowerCase() || 'engineering-report';
+    doc.save(`${name}-engineering-report.pdf`);
+    showToast('Engineering report PDF exported.');
+    return true;
+  } catch (error) {
+    console.error('Engineering report PDF export failed.', error);
+    showToast('Engineering report PDF could not be generated.');
+    return false;
+  }
 }
 
 function createComponent(type, x, y, preferredId) {
@@ -2737,6 +4122,9 @@ function exportReview() {
     troubleshootingScore: Number($('#troubleshooting-score').textContent),
     stationDiagnostics: getStationDiagnosticsProgress(),
     electronicsDiagnostics: getElectronicsDiagnosticsProgress(),
+    plc: getPlcSnapshot(),
+    plcChallenges: getPlcChallengeProgress(),
+    plcTroubleshooting: getPlcTroubleshootingProgress(),
     project: $('#project-name')?.value || '',
     circuit: serialiseCircuit()
   };
@@ -2811,11 +4199,7 @@ function stopPlcScans() {
 }
 
 function savePlcState() {
-  localStorage.setItem(plcStorageKey, JSON.stringify({
-    programId: plcProgramId,
-    model: plcModel,
-    inputs: plcInputs
-  }));
+  localStorage.setItem(plcStorageKey, JSON.stringify(getPlcSnapshot()));
 }
 
 function restorePlcState() {
@@ -2826,6 +4210,10 @@ function restorePlcState() {
     if (!Object.prototype.hasOwnProperty.call(plcPrograms, saved.programId) ||
       !window.DangoteAcademyCore.validatePlcProgram(saved.model).valid) {
       $('#plc-status-text').textContent = 'Saved PLC program is invalid; the default example is loaded.';
+      return;
+    }
+    if (saved.schemaVersion === 1) {
+      restorePlcSnapshot(saved);
       return;
     }
     plcProgramId = saved.programId;
@@ -2848,12 +4236,23 @@ function renderPlcInputs() {
   }).join('');
 }
 
+function renderPlcWatchTable() {
+  const container = $('#plc-watch-table');
+  const inputs = plcAnalogInputCatalog.map(input => `
+    <tr><th scope="row"><code>${input.tag}</code></th><td>${escapeHtml(input.label)}</td>
+    <td><input type="range" min="0" max="100" step="1" value="${plcAnalogInputs[input.tag]}" data-plc-analog-input="${input.tag}" aria-label="${escapeHtml(input.label)} from 0 to 100 percent"></td>
+    <td><output>${plcAnalogInputs[input.tag]} ${input.unit}</output></td></tr>`).join('');
+  container.innerHTML = `<div class="table-scroll"><table><thead><tr><th>Tag</th><th>Point</th><th>Simulated value</th><th>Value</th></tr></thead><tbody>${inputs}<tr><th scope="row"><code>AQ0</code></th><td>Control valve command</td><td><span class="plc-watch-meter"><i style="width:${plcAnalogOutputs.AQ0}%"></i></span></td><td><output>${plcAnalogOutputs.AQ0} %</output></td></tr></tbody></table></div>`;
+}
+
 function renderPlcOutputs() {
-  $('#plc-outputs').innerHTML = plcOutputCatalog.map(output => {
+  const digital = plcOutputCatalog.map(output => {
     const inhibited = plcFault === 'output-inhibit' && plcFaultTarget === output.tag;
     const on = plcOutputs[output.tag] && !inhibited;
     return `<div class="plc-io-point plc-output-point ${on ? 'is-on' : ''}" data-plc-output="${output.tag}"><code>${output.tag}</code><span>${escapeHtml(output.label)}</span><b>${on ? 'ON' : 'OFF'}${inhibited ? ' · INHIBITED' : ''}</b></div>`;
   }).join('');
+  const analog = `<div class="plc-io-point plc-output-point ${plcAnalogOutputs.AQ0 > 0 ? 'is-on' : ''}" data-plc-output="AQ0"><code>AQ0</code><span>Control valve command</span><b>${plcAnalogOutputs.AQ0}%</b></div>`;
+  $('#plc-outputs').innerHTML = digital + analog;
 }
 
 function renderPlcFaultTargets() {
@@ -2867,7 +4266,16 @@ function renderPlcFaultTargets() {
 }
 
 function renderPlcLadder() {
-  const contactTagOptions = [...plcInputCatalog, ...plcOutputCatalog];
+  const timerContacts = plcModel.rungs.filter(rung => rung.timer).map(rung => ({
+    tag: `${rung.timer.tag}.DN`, label: `${rung.timer.tag} done`
+  }));
+  const counterContacts = plcModel.rungs.filter(rung => rung.counter).map(rung => ({
+    tag: `${rung.counter.tag}.DN`, label: `${rung.counter.tag} done`
+  }));
+  const contactTagOptions = [
+    ...plcInputCatalog, ...plcOutputCatalog, ...plcAnalogInputCatalog,
+    ...timerContacts, ...counterContacts
+  ];
   const outputOptions = plcOutputCatalog;
   $('#plc-ladder').innerHTML = plcModel.rungs.map((rung, rungIndex) => {
     const state = plcRungStates[rungIndex];
@@ -2876,20 +4284,56 @@ function renderPlcLadder() {
       <div class="plc-contact-list">${branch.map((contact, contactIndex) => `<label class="plc-contact-editor ${state?.branches[branchIndex] ? 'is-true' : ''}">
         <select data-plc-contact-tag data-rung="${rungIndex}" data-branch="${branchIndex}" data-contact="${contactIndex}" aria-label="Rung ${rungIndex + 1} contact ${contactIndex + 1} tag">${contactTagOptions.map(item => `<option value="${item.tag}" ${contact.tag === item.tag ? 'selected' : ''}>${item.tag}</option>`).join('')}</select>
         <select data-plc-contact-type data-rung="${rungIndex}" data-branch="${branchIndex}" data-contact="${contactIndex}" aria-label="Rung ${rungIndex + 1} contact ${contactIndex + 1} type"><option value="no" ${contact.normallyClosed ? '' : 'selected'}>Normally open</option><option value="nc" ${contact.normallyClosed ? 'selected' : ''}>Normally closed</option></select>
+        <span class="plc-analog-compare" ${contact.tag.startsWith('AI') ? '' : 'hidden'}>
+          <select data-plc-analog-operator data-rung="${rungIndex}" data-branch="${branchIndex}" data-contact="${contactIndex}" aria-label="Analog compare operator"><option value="gte" ${contact.analogOperator === 'gte' ? 'selected' : ''}>&ge;</option><option value="lte" ${contact.analogOperator === 'lte' ? 'selected' : ''}>&le;</option></select>
+          <input type="number" min="0" max="100" step="1" value="${Number.isFinite(contact.threshold) ? contact.threshold : 50}" data-plc-analog-threshold data-rung="${rungIndex}" data-branch="${branchIndex}" data-contact="${contactIndex}" aria-label="Analog compare threshold percent">
+        </span>
         <button type="button" class="plc-remove-contact" data-plc-remove-contact data-rung="${rungIndex}" data-branch="${branchIndex}" data-contact="${contactIndex}" aria-label="Remove ${contact.tag} contact">×</button>
       </label>`).join('')}</div>
       <button type="button" class="plc-editor-action" data-plc-add-series data-rung="${rungIndex}" data-branch="${branchIndex}">+ Series</button>
     </div>`).join('');
+    const instruction = rung.timer
+      ? `<div class="plc-instruction ${state?.instruction?.done ? 'is-true' : ''}"><strong>TON ${rung.timer.tag}</strong><label>Preset scans<input type="number" min="1" max="120" step="1" value="${rung.timer.presetScans}" data-plc-timer-preset data-rung="${rungIndex}" aria-label="Timer preset scans"></label><span>${state?.instruction?.elapsedScans || 0}/${rung.timer.presetScans} scans · ${state?.instruction?.done ? 'DONE' : 'timing'}</span><button type="button" class="plc-editor-action danger" data-plc-remove-instruction data-rung="${rungIndex}">Remove</button></div>`
+      : rung.counter
+        ? `<div class="plc-instruction ${state?.instruction?.done ? 'is-true' : ''}"><strong>CTU ${rung.counter.tag}</strong><label>Preset<input type="number" min="1" max="999" step="1" value="${rung.counter.preset}" data-plc-counter-preset data-rung="${rungIndex}" aria-label="Counter preset"></label><label>Reset input<select data-plc-counter-reset data-rung="${rungIndex}" aria-label="Counter reset input">${plcInputCatalog.map(input => `<option value="${input.tag}" ${rung.counter.resetTag === input.tag ? 'selected' : ''}>${input.tag}</option>`).join('')}</select></label><span>${state?.instruction?.count || 0}/${rung.counter.preset} · ${state?.instruction?.done ? 'DONE' : 'counting'}</span><button type="button" class="plc-editor-action danger" data-plc-remove-instruction data-rung="${rungIndex}">Remove</button></div>`
+        : '';
+    const analogOutput = `<div class="plc-analog-output"><label>Analog output<select data-plc-analog-output data-rung="${rungIndex}" aria-label="Rung ${rungIndex + 1} analog output"><option value="" ${rung.analogOutput ? '' : 'selected'}>None</option><option value="AQ0" ${rung.analogOutput?.tag === 'AQ0' ? 'selected' : ''}>AQ0 · valve</option></select></label>${rung.analogOutput ? `<label>Setpoint %<input type="number" min="0" max="100" step="1" value="${rung.analogOutput.value}" data-plc-analog-setpoint data-rung="${rungIndex}" aria-label="Analog output setpoint percentage"></label>` : ''}</div>`;
     return `<div class="plc-rung ${state?.energised ? 'is-true' : ''}">
       <span class="plc-rung-number">Rung ${rungIndex + 1}</span>
       <div class="plc-rail" aria-hidden="true"></div>
       <div class="plc-branches">${branches}</div>
       <div class="plc-coil-editor"><span>Coil</span><select data-plc-coil data-rung="${rungIndex}" aria-label="Rung ${rungIndex + 1} output coil">${outputOptions.map(item => `<option value="${item.tag}" ${rung.coil === item.tag ? 'selected' : ''}>${item.tag} · ${escapeHtml(item.label)}</option>`).join('')}</select><b>${state?.energised ? 'ENERGIZED' : 'DE-ENERGIZED'}</b></div>
       <div class="plc-rail plc-rail-right" aria-hidden="true"></div>
-      <div class="plc-rung-actions"><button type="button" class="plc-editor-action" data-plc-add-branch data-rung="${rungIndex}">+ Parallel branch</button><button type="button" class="plc-editor-action danger" data-plc-remove-rung data-rung="${rungIndex}">Remove rung</button></div>
+      <div class="plc-rung-actions"><button type="button" class="plc-editor-action" data-plc-add-branch data-rung="${rungIndex}">+ Parallel branch</button><button type="button" class="plc-editor-action" data-plc-add-instruction="timer" data-rung="${rungIndex}" ${rung.timer || rung.counter ? 'disabled' : ''}>+ TON</button><button type="button" class="plc-editor-action" data-plc-add-instruction="counter" data-rung="${rungIndex}" ${rung.timer || rung.counter ? 'disabled' : ''}>+ CTU</button>${instruction}${analogOutput}<button type="button" class="plc-editor-action danger" data-plc-remove-rung data-rung="${rungIndex}">Remove rung</button></div>
     </div>`;
   }).join('');
   $('#plc-add-rung').disabled = plcModel.rungs.length >= 8;
+}
+
+function renderPlcExplanation() {
+  const container = $('#plc-explanation');
+  if (!plcLastExplanations.length) {
+    container.innerHTML = '<p class="plot-placeholder">Run a scan to see contact, branch, timer, and counter decisions.</p>';
+    return;
+  }
+  container.innerHTML = plcLastExplanations.map(item => {
+    const branches = item.branchResults.map((branch, index) => {
+      const contacts = branch.contacts.map(contact => {
+        const status = contact.closed ? 'closed' : 'open';
+        const test = contact.value === undefined ? '' :
+          ` (${contact.value}% ${contact.operator === 'gte' ? '&ge;' : '&le;'} ${contact.threshold}%)`;
+        return `${escapeHtml(contact.tag)} ${status}${test}`;
+      }).join(' AND ');
+      return `Path ${index + 1}: ${contacts} → ${branch.energised ? 'TRUE' : 'FALSE'}`;
+    }).join('; ');
+    const instruction = item.instruction
+      ? ` · ${item.instruction.type} ${item.instruction.tag}: ${item.instruction.elapsedScans !== undefined ? `${item.instruction.elapsedScans}/${item.instruction.presetScans} scans` : `${item.instruction.count}/${item.instruction.preset}`} ${item.instruction.done ? 'DONE' : 'not done'}${item.instruction.reset ? ' · reset' : ''}`
+      : '';
+    const analogOutput = item.analogOutput
+      ? ` · ${item.analogOutput.tag} = ${item.analogOutput.value}%`
+      : '';
+    return `<p class="plc-explanation-rung"><strong>${escapeHtml(item.coil)} ${item.energised ? 'energized' : 'de-energized'}</strong><span>${branches}${instruction}${analogOutput}</span></p>`;
+  }).join('');
 }
 
 function renderPlcTrend() {
@@ -2924,9 +4368,13 @@ function renderPlcWorkspace() {
   renderPlcFaultTargets();
   renderPlcInputs();
   renderPlcOutputs();
+  renderPlcWatchTable();
   renderPlcLadder();
+  renderPlcExplanation();
   renderPlcTrend();
   $('#plc-scan-count').textContent = String(plcScanCount);
+  renderPlcChallenges();
+  renderPlcTroubleshooting();
 }
 
 function updatePlcScan() {
@@ -2935,20 +4383,26 @@ function updatePlcScan() {
   if (plcFault === 'input-open' && plcFaultTarget.startsWith('I')) inputImage[plcFaultTarget] = false;
   if (plcFault === 'input-short' && plcFaultTarget.startsWith('I')) inputImage[plcFaultTarget] = true;
   if (plcFault === 'output-inhibit' && plcFaultTarget.startsWith('Q')) inhibitedOutput = plcFaultTarget;
-  const result = window.DangoteAcademyCore.calculatePlcScan(plcModel, inputImage, plcOutputs);
+  const result = window.DangoteAcademyCore.calculatePlcScan(
+    plcModel, inputImage, plcOutputs, plcRuntimeState, plcAnalogInputs
+  );
   if (!result.valid) {
     stopPlcScans();
     $('#plc-status-text').textContent = `Program error: ${result.error}`;
     return false;
   }
   plcOutputs = { ...result.outputs };
+  plcAnalogOutputs = { AQ0: result.analogOutputs.AQ0 || 0 };
+  plcRuntimeState = result.runtimeState;
   plcRungStates = result.rungStates;
+  plcLastExplanations = result.rungStates;
   plcScanCount += 1;
   plcTrendSamples.push({ scan: plcScanCount, outputs: { ...plcOutputs } });
   plcTrendSamples = plcTrendSamples.slice(-60);
   const energizedCount = Object.entries(plcOutputs)
     .filter(([tag, on]) => on && tag !== inhibitedOutput).length;
   $('#plc-status-text').textContent = `Scan complete · ${energizedCount} output${energizedCount === 1 ? '' : 's'} energized${plcFault === 'none' ? '' : ` · ${$('#plc-fault').selectedOptions[0].textContent}`}.`;
+  savePlcState();
   renderPlcWorkspace();
   return true;
 }
@@ -2959,8 +4413,12 @@ function selectPlcProgram(programId) {
   plcProgramId = programId;
   plcModel = clonePlcProgram(plcPrograms[programId]);
   plcInputs = Object.fromEntries(plcInputCatalog.map(input => [input.tag, input.initial]));
+  plcAnalogInputs = Object.fromEntries(plcAnalogInputCatalog.map(input => [input.tag, input.initial]));
   plcOutputs = Object.fromEntries(plcOutputCatalog.map(output => [output.tag, false]));
+  plcAnalogOutputs = { AQ0: 0 };
+  plcRuntimeState = { timers: {}, counters: {} };
   plcRungStates = [];
+  plcLastExplanations = [];
   plcScanCount = 0;
   plcTrendSamples = [];
   plcFault = 'none';
@@ -2982,7 +4440,7 @@ function startPlcScans() {
   }
   $('#plc-run').innerHTML = '<i class="fa-solid fa-stop"></i> Stop scans';
   $('#plc-run').className = 'secondary-button';
-  updatePlcScan();
+  if (!updatePlcScan()) return;
   plcScanTimer = setInterval(updatePlcScan, 500);
 }
 
@@ -3003,17 +4461,50 @@ function handlePlcLadderEdit(event) {
   const target = event.target;
   const rungIndex = Number(target.dataset.rung);
   if (!Number.isInteger(rungIndex) || !plcModel.rungs[rungIndex]) return;
-  if (target.matches('[data-plc-contact-tag], [data-plc-contact-type]')) {
+  if (target.matches('[data-plc-contact-tag], [data-plc-contact-type], [data-plc-analog-operator], [data-plc-analog-threshold]')) {
     const branchIndex = Number(target.dataset.branch);
     const contactIndex = Number(target.dataset.contact);
     const contact = plcModel.rungs[rungIndex].branches[branchIndex]?.[contactIndex];
     if (!contact) return;
-    if (target.matches('[data-plc-contact-tag]')) contact.tag = target.value;
-    else contact.normallyClosed = target.value === 'nc';
+    if (target.matches('[data-plc-contact-tag]')) {
+      contact.tag = target.value;
+      if (target.value.startsWith('AI')) {
+        contact.analogOperator ||= 'gte';
+        contact.threshold = Number.isFinite(contact.threshold) ? contact.threshold : 50;
+      } else {
+        delete contact.analogOperator;
+        delete contact.threshold;
+      }
+    } else if (target.matches('[data-plc-contact-type]')) contact.normallyClosed = target.value === 'nc';
+    else if (target.matches('[data-plc-analog-operator]')) contact.analogOperator = target.value;
+    else {
+      const threshold = target.valueAsNumber;
+      if (!Number.isFinite(threshold) || threshold < 0 || threshold > 100) {
+        $('#plc-status-text').textContent = 'Analog compare threshold must be between 0 and 100%.';
+        return;
+      }
+      contact.threshold = threshold;
+    }
     updatePlcProgram('Ladder contact updated.');
   } else if (target.matches('[data-plc-coil]')) {
     plcModel.rungs[rungIndex].coil = target.value;
     updatePlcProgram('Output coil updated.');
+  } else if (target.matches('[data-plc-timer-preset]')) {
+    plcModel.rungs[rungIndex].timer.presetScans = target.valueAsNumber;
+    updatePlcProgram('Timer preset updated.');
+  } else if (target.matches('[data-plc-counter-preset]')) {
+    plcModel.rungs[rungIndex].counter.preset = target.valueAsNumber;
+    updatePlcProgram('Counter preset updated.');
+  } else if (target.matches('[data-plc-counter-reset]')) {
+    plcModel.rungs[rungIndex].counter.resetTag = target.value;
+    updatePlcProgram('Counter reset input updated.');
+  } else if (target.matches('[data-plc-analog-output]')) {
+    if (target.value) plcModel.rungs[rungIndex].analogOutput = { tag: target.value, value: 50 };
+    else delete plcModel.rungs[rungIndex].analogOutput;
+    updatePlcProgram('Analog output assignment updated.');
+  } else if (target.matches('[data-plc-analog-setpoint]')) {
+    plcModel.rungs[rungIndex].analogOutput.value = target.valueAsNumber;
+    updatePlcProgram('Analog output setpoint updated.');
   }
 }
 
@@ -3022,7 +4513,34 @@ function handlePlcLadderAction(event) {
   if (!button) return;
   const rungIndex = Number(button.dataset.rung);
   const rung = plcModel.rungs[rungIndex];
-  if (button.matches('[data-plc-add-series]')) {
+  if (button.matches('[data-plc-add-instruction]')) {
+    if (!rung || rung.timer || rung.counter) return;
+    const kind = button.dataset.plcAddInstruction;
+    const used = new Set(plcModel.rungs.map(item => item.timer?.tag || item.counter?.tag).filter(Boolean));
+    const prefix = kind === 'timer' ? 'T' : 'C';
+    const tag = Array.from({ length: 100 }, (_, index) => `${prefix}${index}`).find(item => !used.has(item));
+    if (!tag) {
+      $('#plc-status-text').textContent = `No ${kind} identifiers remain.`;
+      return;
+    }
+    if (kind === 'timer') rung.timer = { tag, presetScans: 5 };
+    else rung.counter = { tag, preset: 3, resetTag: 'I0.5' };
+    updatePlcProgram(`${kind === 'timer' ? 'TON timer' : 'CTU counter'} added.`);
+  } else if (button.matches('[data-plc-remove-instruction]')) {
+    if (!rung) return;
+    const tag = rung.timer?.tag || rung.counter?.tag;
+    for (const currentRung of plcModel.rungs) for (const branch of currentRung.branches) {
+      for (let index = branch.length - 1; index >= 0; index--) {
+        if (branch[index].tag === `${tag}.DN`) branch.splice(index, 1);
+      }
+      if (!branch.length) branch.push({ tag: 'I0.0', normallyClosed: false });
+    }
+    delete rung.timer;
+    delete rung.counter;
+    delete plcRuntimeState.timers[tag];
+    delete plcRuntimeState.counters[tag];
+    updatePlcProgram('Timer or counter instruction removed.');
+  } else if (button.matches('[data-plc-add-series]')) {
     const branch = rung?.branches[Number(button.dataset.branch)];
     if (!branch || branch.length >= 6) {
       $('#plc-status-text').textContent = 'A branch is limited to 6 series contacts.';
@@ -3053,6 +4571,138 @@ function handlePlcLadderAction(event) {
     plcModel.rungs.splice(rungIndex, 1);
     updatePlcProgram('Rung removed.');
   }
+}
+
+function renderPlcChallenges() {
+  const select = $('#plc-challenge');
+  const selected = select.value;
+  select.innerHTML = plcChallenges.map(challenge =>
+    `<option value="${challenge.id}">${escapeHtml(challenge.title)}</option>`
+  ).join('');
+  if (plcChallenges.some(challenge => challenge.id === selected)) select.value = selected;
+  else select.value = plcChallenges[0].id;
+  const challenge = plcChallenges.find(item => item.id === select.value);
+  const progress = getPlcChallengeProgress();
+  const record = progress[challenge.id] || { attempts: 0, completed: false };
+  $('#plc-challenge-guidance').innerHTML = `<strong>Goal:</strong> ${escapeHtml(challenge.objective)} <span>Suggested example: ${escapeHtml(plcPrograms[challenge.programId].title)}. ${escapeHtml(challenge.hint)}</span>`;
+  $('#plc-challenge-feedback').textContent = record.completed
+    ? `Completed in ${record.attempts} attempt${record.attempts === 1 ? '' : 's'}.`
+    : record.attempts ? `Attempts: ${record.attempts}. Adjust the ladder and check again.` : '';
+  $('#plc-challenge-score').textContent = String(plcChallenges.filter(item => progress[item.id]?.completed).length);
+  $('#plc-challenge-total').textContent = String(plcChallenges.length);
+}
+
+function checkPlcChallenge() {
+  const challenge = plcChallenges.find(item => item.id === $('#plc-challenge').value);
+  if (!challenge) return;
+  const progress = getPlcChallengeProgress();
+  const record = progress[challenge.id] || { attempts: 0, completed: false };
+  record.attempts = (Number(record.attempts) || 0) + 1;
+  let passed = true;
+  let outputs = {};
+  let runtimeState = { timers: {}, counters: {} };
+  for (const step of challenge.steps) {
+    const result = window.DangoteAcademyCore.calculatePlcScan(
+      plcModel, step.inputs, outputs, runtimeState,
+      { ...Object.fromEntries(plcAnalogInputCatalog.map(input => [input.tag, input.initial])), ...step.analogInputs }
+    );
+    if (!result.valid || Object.entries(step.outputs).some(([tag, value]) => result.outputs[tag] !== value) ||
+      Object.entries(step.analogOutputs || {}).some(([tag, value]) => result.analogOutputs[tag] !== value)) {
+      passed = false;
+      break;
+    }
+    outputs = result.outputs;
+    runtimeState = result.runtimeState;
+  }
+  if (passed) {
+    record.completed = true;
+    record.completedAt = new Date().toISOString();
+  }
+  progress[challenge.id] = record;
+  localStorage.setItem(plcChallengeStorageKey, JSON.stringify(progress));
+  renderPlcChallenges();
+  renderStudentProgressSummary();
+  $('#plc-challenge-feedback').textContent = passed
+    ? `Challenge passed: ${challenge.objective}`
+    : `Not yet. The active ladder did not meet every test case. Hint: ${challenge.hint}`;
+}
+
+function renderPlcTroubleshooting() {
+  const progress = getPlcTroubleshootingProgress();
+  $('#plc-diagnostic-results').innerHTML = plcTroubleshootingCases.map((scenario, index) => {
+    const record = progress[scenario.id] || { attempts: 0, completed: false };
+    const options = scenario.options.map((option, answer) => {
+      const isCorrect = record.completed && answer === scenario.answer;
+      const isSelected = !record.completed && answer === record.lastAnswer;
+      return `<button class="scenario-option${isCorrect ? ' correct' : isSelected ? ' incorrect' : ''}" data-plc-diagnostic="${scenario.id}" data-answer="${answer}" ${record.completed ? 'disabled' : ''}>${escapeHtml(option)}</button>`;
+    }).join('');
+    const feedback = record.completed
+      ? `<p class="scenario-feedback plc-diagnostic-feedback">${escapeHtml(scenario.rationale)}</p>`
+      : record.lastAnswer !== undefined
+        ? '<p class="scenario-feedback plc-diagnostic-feedback">Review the input image, contact state, rung path, and output image before trying again.</p>'
+        : '';
+    return `<article class="scenario-card plc-scenario-card"><h3>${escapeHtml(scenario.title)}</h3><p>${escapeHtml(scenario.symptom)}</p><small>Attempts: ${Number(record.attempts) || 0}${record.completed ? ' · Completed' : ''}</small><div class="scenario-options">${options}</div>${feedback}</article>`;
+  }).join('');
+  $('#plc-diagnostics-score').textContent = String(plcTroubleshootingCases.filter(item => progress[item.id]?.completed).length);
+  $('#plc-diagnostics-total').textContent = String(plcTroubleshootingCases.length);
+}
+
+function answerPlcDiagnostic(event) {
+  const option = event.target.closest('[data-plc-diagnostic]');
+  if (!option || option.disabled) return;
+  const scenario = plcTroubleshootingCases.find(item => item.id === option.dataset.plcDiagnostic);
+  const selectedAnswer = Number(option.dataset.answer);
+  if (!scenario || !Number.isInteger(selectedAnswer) || selectedAnswer < 0 || selectedAnswer >= scenario.options.length) return;
+  const progress = getPlcTroubleshootingProgress();
+  const record = progress[scenario.id] || { attempts: 0, completed: false };
+  record.attempts = (Number(record.attempts) || 0) + 1;
+  record.lastAnswer = selectedAnswer;
+  if (selectedAnswer === scenario.answer) {
+    record.completed = true;
+    record.completedAt = new Date().toISOString();
+  }
+  progress[scenario.id] = record;
+  localStorage.setItem(plcTroubleshootingStorageKey, JSON.stringify(progress));
+  renderPlcTroubleshooting();
+  renderStudentProgressSummary();
+}
+
+function exportPlcProgram() {
+  const snapshot = getPlcSnapshot();
+  const blob = new Blob([JSON.stringify(snapshot, null, 2)], { type: 'application/json' });
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(blob);
+  link.download = `plc-${plcProgramId}.json`;
+  link.click();
+  URL.revokeObjectURL(link.href);
+  showToast('PLC program exported as JSON.');
+}
+
+function importPlcProgram(event) {
+  const file = event.target.files?.[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const snapshot = JSON.parse(reader.result);
+      validatePlcSnapshot(snapshot);
+      restorePlcSnapshot(snapshot);
+      $('#plc-program').value = plcProgramId;
+      $('#plc-status-text').textContent = 'PLC program imported and saved on this device.';
+      showToast('PLC program imported.');
+    } catch (error) {
+      console.error('PLC program could not be imported.', error);
+      showToast(error instanceof SyntaxError ? 'The selected file is not valid JSON.' : error.message || 'The PLC program is invalid.');
+    } finally {
+      event.target.value = '';
+    }
+  };
+  reader.onerror = () => {
+    console.error('PLC program file could not be read.', reader.error);
+    showToast('The selected PLC program file could not be read.');
+    event.target.value = '';
+  };
+  reader.readAsText(file);
 }
 
 function toggleSimulation() {
@@ -3106,6 +4756,7 @@ function initialise() {
   renderPlcWorkspace();
   insertLoadScheduleModule();
   renderCommissioningChecks(getSavedCommissioningDraft());
+  renderStandardsReview(getSavedStandardsReviewDraft());
   const capacityWarning = document.createElement('small');
   capacityWarning.id = 'res-capacity-warning';
   capacityWarning.setAttribute('role', 'status');
@@ -3125,7 +4776,10 @@ function initialise() {
   renderAdminTools();
   $$('.nav-item').forEach(item => item.addEventListener('click', () => switchModule(item.dataset.module)));
   $$('[data-go]').forEach(item => item.addEventListener('click', () => switchModule(item.dataset.go)));
-  $('#menu-toggle').addEventListener('click', () => $('#sidebar').classList.toggle('open'));
+  $('#menu-toggle').addEventListener('click', event => {
+    const open = $('#sidebar').classList.toggle('open');
+    event.currentTarget.setAttribute('aria-expanded', String(open));
+  });
   $('#calc-form').addEventListener('submit', calculateLoad);
   const invalidateCalculation = () => {
     invalidateLoadSizingResult();
@@ -3136,7 +4790,10 @@ function initialise() {
   $('#calc-form').addEventListener('invalid', event => { event.preventDefault(); showToast('Enter a load greater than zero and valid factor values.'); }, true);
   $('#add-to-boq').addEventListener('click', () => { if (!lastCalculation) { showToast('Run a calculation first.'); return; } addBoqRow(`${lastCalculation.cable.size}mm² Single Core Copper Wire`, 'Cabling', 1, 'Roll', lastCalculation.cable.size * 15000); addBoqRow(`${lastCalculation.breaker} MCB`, 'Protection', 1, 'Pcs', 4500); switchModule('boq'); showToast('Calculation added to the BOQ.'); });
   $('#boq-body').addEventListener('input', updateBOQ); $('#boq-body').addEventListener('click', event => { if (event.target.closest('.delete-row')) { event.target.closest('tr').remove(); updateBOQ(); } });
-  $('#add-custom-item').addEventListener('click', () => addBoqRow('Custom electrical item', 'General', 1, 'Pcs', 0)); $('#export-pdf').addEventListener('click', exportPdf);
+  $('#add-custom-item').addEventListener('click', () => addBoqRow('Custom electrical item', 'General', 1, 'Pcs', 0)); $('#export-pdf').addEventListener('click', exportPdf); $('#export-report-pdf').addEventListener('click', exportEngineeringReportPdf);
+  $('#export-workspace-backup').addEventListener('click', exportWorkspaceBackup);
+  $('#import-workspace-backup').addEventListener('click', () => $('#workspace-backup-file').click());
+  $('#workspace-backup-file').addEventListener('change', restoreWorkspaceBackup);
   $('#save-project').addEventListener('click', saveNamedProject); $('#submit-project').addEventListener('click', submitNamedProject); $('#project-list').addEventListener('change', () => { loadNamedProject(); renderRevisionControls(); }); $('#delete-project').addEventListener('click', deleteNamedProject); $('#export-project').addEventListener('click', exportProject); $('#export-engineering-report').addEventListener('click', exportEngineeringReport); $('#import-project').addEventListener('click', () => $('#project-file').click()); $('#project-file').addEventListener('change', importProject);
   $('#project-revision-list').addEventListener('change', () => { $('#revision-comparison').textContent = 'Ready to compare selected revision.'; }); $('#compare-revision').addEventListener('click', compareProjectRevisions); $('#restore-revision').addEventListener('click', restoreProjectRevision);
   $('#component-search').addEventListener('input', renderComponentCatalog); $('#component-category').addEventListener('change', renderComponentCatalog);
@@ -3155,6 +4812,8 @@ function initialise() {
   });
   $('#commissioning-checks').addEventListener('input', persistCommissioningDraft);
   $('#commissioning-checks').addEventListener('change', persistCommissioningDraft);
+  $('#standards-review-panel')?.addEventListener('input', persistStandardsReviewDraft);
+  $('#standards-review-panel')?.addEventListener('change', persistStandardsReviewDraft);
   $('#calculate-schedule').addEventListener('click', calculateSchedule); $('#schedule-phase').addEventListener('change', calculateSchedule); $('#schedule-method').addEventListener('change', calculateSchedule); $('#schedule-rcd').addEventListener('change', calculateSchedule); $('#add-load-row').addEventListener('click', () => { addScheduleRow(); calculateSchedule(); }); $('#schedule-body').addEventListener('input', calculateSchedule); $('#schedule-body').addEventListener('click', event => { if (event.target.closest('.delete-schedule-row')) { event.target.closest('tr').remove(); calculateSchedule(); } });
   $('#troubleshooting-results').addEventListener('click', answerTroubleshooting);
   $('#station-diagnostic-results').addEventListener('click', answerStationDiagnostic);
@@ -3164,6 +4823,18 @@ function initialise() {
     if (!button) return;
     const tag = button.dataset.plcInput;
     plcInputs[tag] = !plcInputs[tag];
+    savePlcState();
+    updatePlcScan();
+  });
+  $('#plc-watch-table').addEventListener('change', event => {
+    const input = event.target.closest('[data-plc-analog-input]');
+    if (!input) return;
+    const value = input.valueAsNumber;
+    if (!Number.isFinite(value) || value < 0 || value > 100) {
+      $('#plc-status-text').textContent = 'Analog input value must be between 0 and 100%.';
+      return;
+    }
+    plcAnalogInputs[input.dataset.plcAnalogInput] = value;
     savePlcState();
     updatePlcScan();
   });
@@ -3195,6 +4866,12 @@ function initialise() {
   $('#plc-reset').addEventListener('click', resetPlcProgram);
   $('#plc-ladder').addEventListener('change', handlePlcLadderEdit);
   $('#plc-ladder').addEventListener('click', handlePlcLadderAction);
+  $('#plc-challenge').addEventListener('change', renderPlcChallenges);
+  $('#plc-check-challenge').addEventListener('click', checkPlcChallenge);
+  $('#plc-diagnostic-results').addEventListener('click', answerPlcDiagnostic);
+  $('#plc-export').addEventListener('click', exportPlcProgram);
+  $('#plc-import').addEventListener('click', () => $('#plc-file').click());
+  $('#plc-file').addEventListener('change', importPlcProgram);
   $('#walkthrough-check').addEventListener('click', checkCircuitWalkthroughStep);
   $('#walkthrough-reset').addEventListener('click', startCircuitWalkthrough);
   $('#meter-measurement').addEventListener('change', renderVirtualInstruments);
@@ -3216,6 +4893,13 @@ function initialise() {
   $('#lesson-results').addEventListener('click', event => { const button = event.target.closest('.lesson-check'); if (button) checkLesson(button.dataset.lesson); });
   $('#export-review').addEventListener('click', exportReview);
   $('#save-profile').addEventListener('click', saveProfile);
+  $('#cloud-signin-form').addEventListener('submit', signInToCloud);
+  $('#cloud-set-password-form').addEventListener('submit', setCloudPassword);
+  $('#cloud-profile-form').addEventListener('submit', updateCloudProfile);
+  $('#cloud-signout').addEventListener('click', signOutOfCloud);
+  $('#cloud-create-cohort-form').addEventListener('submit', createCloudCohort);
+  $('#cloud-join-cohort-form').addEventListener('submit', joinCloudCohort);
+  $('#cloud-cohorts').addEventListener('click', reviewCloudProject);
   $('#review-projects').addEventListener('click', event => { const button = event.target.closest('.review-action'); if (button) updateProjectReviewStatus(button.dataset.name, button.dataset.status); });
   $('#review-projects').addEventListener('input', event => {
     if (!event.target.matches('.review-comment-input') || !canReviewProjects()) return;
@@ -3249,6 +4933,7 @@ function initialise() {
   $('#validate-circuit').addEventListener('click', validateCircuit);
   $('#save-circuit').addEventListener('click', saveCircuit); $('#load-circuit').addEventListener('click', loadCircuit); $('#export-circuit').addEventListener('click', exportCircuit); $('#import-circuit').addEventListener('click', () => $('#circuit-file').click()); $('#circuit-file').addEventListener('change', importCircuit);
   calculateLoad({ preventDefault() {} }); calculateSchedule(); calculateMotorFeeder(); updateCircuitSummary(); validateCircuit(); updateCircuitHistoryControls();
+  renderCloudWorkspace();
 }
 
 document.addEventListener('DOMContentLoaded', initialise);

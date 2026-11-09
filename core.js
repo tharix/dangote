@@ -17,6 +17,8 @@
 
   const deratingFactors = { clipped: 1, conduit: .8, tray: .9, ground: .7 };
   const breakerOptions = [6, 10, 16, 20, 25, 32, 40, 50, 63, 80, 100, 125];
+  const digitalInputs = new Set(Array.from({ length: 6 }, (_, index) => `I0.${index}`));
+  const digitalOutputs = new Set(Array.from({ length: 3 }, (_, index) => `Q0.${index}`));
   const round = (value, digits = 2) => Number(value.toFixed(digits));
 
   function chooseCable(current, derating) {
@@ -333,55 +335,174 @@
       return { valid: false, error: 'A PLC program must contain between 1 and 8 rungs.' };
     }
     const coils = new Set();
+    const timerTags = new Set();
+    const counterTags = new Set();
+    const analogOutputs = new Set();
     for (const rung of program.rungs) {
       if (!rung || !Array.isArray(rung.branches) || rung.branches.length < 1 || rung.branches.length > 4 ||
-        typeof rung.coil !== 'string' || !/^Q\d{1,2}\.\d$/.test(rung.coil)) {
+        typeof rung.coil !== 'string' || !digitalOutputs.has(rung.coil)) {
         return { valid: false, error: 'Each rung needs 1–4 branches and one valid output coil.' };
       }
       if (coils.has(rung.coil)) return { valid: false, error: `Output ${rung.coil} is assigned to more than one rung.` };
       coils.add(rung.coil);
+      if (rung.timer && rung.counter) {
+        return { valid: false, error: 'A rung can contain one timer or one counter, not both.' };
+      }
+      if (rung.timer) {
+        if (!/^T\d{1,2}$/.test(rung.timer.tag) || !Number.isInteger(rung.timer.presetScans) ||
+          rung.timer.presetScans < 1 || rung.timer.presetScans > 120 || timerTags.has(rung.timer.tag)) {
+          return { valid: false, error: 'Timer tags must be unique and presets must be 1–120 scans.' };
+        }
+        timerTags.add(rung.timer.tag);
+      }
+      if (rung.counter) {
+        if (!/^C\d{1,2}$/.test(rung.counter.tag) || !Number.isInteger(rung.counter.preset) ||
+          rung.counter.preset < 1 || rung.counter.preset > 999 ||
+          !digitalInputs.has(rung.counter.resetTag) || counterTags.has(rung.counter.tag)) {
+          return { valid: false, error: 'Counter tags must be unique, presets 1–999, and reset from a digital input.' };
+        }
+        counterTags.add(rung.counter.tag);
+      }
+      if (rung.analogOutput) {
+        if (rung.analogOutput.tag !== 'AQ0' || !Number.isFinite(rung.analogOutput.value) ||
+          rung.analogOutput.value < 0 || rung.analogOutput.value > 100 || analogOutputs.has(rung.analogOutput.tag)) {
+          return { valid: false, error: 'Analog output must be uniquely assigned AQ0 with a 0–100% setpoint.' };
+        }
+        analogOutputs.add(rung.analogOutput.tag);
+      }
       for (const branch of rung.branches) {
         if (!Array.isArray(branch) || branch.length < 1 || branch.length > 6) {
           return { valid: false, error: 'Each ladder branch needs between 1 and 6 contacts.' };
         }
         for (const contact of branch) {
           if (!contact || typeof contact.tag !== 'string' ||
-            !/^[IQ]\d{1,2}\.\d$/.test(contact.tag) ||
+            !(digitalInputs.has(contact.tag) || digitalOutputs.has(contact.tag) || ['AI0', 'AI1'].includes(contact.tag) ||
+              /^T\d{1,2}\.DN$/.test(contact.tag) || /^C\d{1,2}\.DN$/.test(contact.tag)) ||
             typeof contact.normallyClosed !== 'boolean') {
             return { valid: false, error: 'Contacts need a valid I/O tag and contact type.' };
           }
+          if (contact.tag.startsWith('AI') && (!['gte', 'lte'].includes(contact.analogOperator) ||
+            !Number.isFinite(contact.threshold) || contact.threshold < 0 || contact.threshold > 100)) {
+            return { valid: false, error: 'Analog compare contacts need a >= or <= threshold from 0–100%.' };
+          }
+          if (contact.tag.startsWith('T') && !/^T\d{1,2}\.DN$/.test(contact.tag)) {
+            return { valid: false, error: 'Timer contacts must use a .DN done bit.' };
+          }
+          if (contact.tag.startsWith('C') && !/^C\d{1,2}\.DN$/.test(contact.tag)) {
+            return { valid: false, error: 'Counter contacts must use a .DN done bit.' };
+          }
         }
+      }
+    }
+    const validContacts = new Set([
+      ...Array.from({ length: 100 }, (_, index) => `T${index}.DN`),
+      ...Array.from({ length: 100 }, (_, index) => `C${index}.DN`)
+    ]);
+    const configuredTimers = new Set(program.rungs.filter(rung => rung.timer).map(rung => `${rung.timer.tag}.DN`));
+    const configuredCounters = new Set(program.rungs.filter(rung => rung.counter).map(rung => `${rung.counter.tag}.DN`));
+    for (const rung of program.rungs) for (const branch of rung.branches) for (const contact of branch) {
+      if (validContacts.has(contact.tag) &&
+        !configuredTimers.has(contact.tag) && !configuredCounters.has(contact.tag)) {
+        return { valid: false, error: `Contact ${contact.tag} has no matching timer or counter instruction.` };
       }
     }
     return { valid: true };
   }
 
-  function calculatePlcScan(program, inputImage = {}, previousOutputs = {}) {
+  function calculatePlcScan(program, inputImage = {}, previousOutputs = {}, runtimeState = {}, analogInputs = {}) {
     const validation = validatePlcProgram(program);
     if (!validation.valid) return validation;
     if (!inputImage || typeof inputImage !== 'object' || Array.isArray(inputImage) ||
-      !previousOutputs || typeof previousOutputs !== 'object' || Array.isArray(previousOutputs)) {
-      return { valid: false, error: 'PLC input and output images must be tag/value objects.' };
+      !previousOutputs || typeof previousOutputs !== 'object' || Array.isArray(previousOutputs) ||
+      !runtimeState || typeof runtimeState !== 'object' || Array.isArray(runtimeState) ||
+      !analogInputs || typeof analogInputs !== 'object' || Array.isArray(analogInputs)) {
+      return { valid: false, error: 'PLC I/O images and runtime state must be objects.' };
     }
     if ([inputImage, previousOutputs].some(image =>
       Object.values(image).some(value => typeof value !== 'boolean'))) {
       return { valid: false, error: 'PLC input and output image values must be boolean.' };
     }
+    if (Object.keys(inputImage).some(tag => !digitalInputs.has(tag)) ||
+      Object.keys(previousOutputs).some(tag => !digitalOutputs.has(tag))) {
+      return { valid: false, error: 'PLC digital I/O image contains an unsupported tag.' };
+    }
+    if (Object.entries(analogInputs).some(([tag, value]) =>
+      !/^AI\d{1,2}$/.test(tag) || !Number.isFinite(value) || value < 0 || value > 100)) {
+      return { valid: false, error: 'Analog input values must be tagged AI points from 0–100%.' };
+    }
+    if (runtimeState.timers && (typeof runtimeState.timers !== 'object' || Array.isArray(runtimeState.timers)) ||
+      runtimeState.counters && (typeof runtimeState.counters !== 'object' || Array.isArray(runtimeState.counters))) {
+      return { valid: false, error: 'PLC timer and counter state must be tag/value objects.' };
+    }
+    const timers = { ...(runtimeState.timers || {}) };
+    const counters = { ...(runtimeState.counters || {}) };
+    const analogOutputs = {};
 
     const outputs = { ...previousOutputs };
     const readContact = contact => {
-      const image = contact.tag.startsWith('I') ? inputImage : outputs;
-      const signal = image[contact.tag] === true;
+      let signal;
+      if (contact.tag.startsWith('I')) signal = inputImage[contact.tag] === true;
+      else if (contact.tag.startsWith('Q')) signal = outputs[contact.tag] === true;
+      else if (contact.tag.startsWith('AI')) {
+        const value = analogInputs[contact.tag] || 0;
+        signal = contact.analogOperator === 'gte' ? value >= contact.threshold : value <= contact.threshold;
+      } else if (contact.tag.startsWith('T')) signal = timers[contact.tag.slice(0, -3)]?.done === true;
+      else signal = (counters[contact.tag.slice(0, -3)]?.count || 0) >=
+        (program.rungs.find(rung => rung.counter?.tag === contact.tag.slice(0, -3))?.counter.preset || Infinity);
       return contact.normallyClosed ? !signal : signal;
     };
     const rungStates = program.rungs.map(rung => {
-      const branches = rung.branches.map(branch => branch.every(readContact));
+      const branchResults = rung.branches.map(branch => ({
+        energised: branch.every(readContact),
+        contacts: branch.map(contact => ({
+          tag: contact.tag,
+          closed: readContact(contact),
+          normallyClosed: contact.normallyClosed,
+          ...(contact.tag.startsWith('AI')
+            ? { value: analogInputs[contact.tag] || 0, operator: contact.analogOperator, threshold: contact.threshold }
+            : {})
+        }))
+      }));
+      const branches = branchResults.map(branch => branch.energised);
       const energised = branches.some(Boolean);
       outputs[rung.coil] = energised;
-      return { branches, energised, coil: rung.coil };
+      let instruction = null;
+      if (rung.timer) {
+        const current = timers[rung.timer.tag] || { elapsedScans: 0, done: false };
+        const priorScans = Number.isInteger(current.elapsedScans) && current.elapsedScans >= 0
+          ? current.elapsedScans
+          : 0;
+        const elapsedScans = energised ? Math.min(rung.timer.presetScans, priorScans + 1) : 0;
+        const done = elapsedScans >= rung.timer.presetScans;
+        timers[rung.timer.tag] = { elapsedScans, done };
+        instruction = { type: 'TON', tag: rung.timer.tag, elapsedScans, presetScans: rung.timer.presetScans, done };
+      }
+      if (rung.counter) {
+        const current = counters[rung.counter.tag] || { count: 0, previousRung: false };
+        const reset = inputImage[rung.counter.resetTag] === true;
+        const priorCount = Number.isInteger(current.count) && current.count >= 0 ? current.count : 0;
+        const priorRung = current.previousRung === true;
+        const count = reset ? 0 : Math.min(rung.counter.preset, priorCount +
+          (energised && !priorRung ? 1 : 0));
+        const done = count >= rung.counter.preset;
+        counters[rung.counter.tag] = { count, previousRung: energised };
+        instruction = { type: 'CTU', tag: rung.counter.tag, count, preset: rung.counter.preset, reset, done };
+      }
+      if (rung.analogOutput) {
+        analogOutputs[rung.analogOutput.tag] = energised ? rung.analogOutput.value : 0;
+      }
+      return {
+        branches, branchResults, energised, coil: rung.coil, instruction,
+        analogOutput: rung.analogOutput
+          ? { tag: rung.analogOutput.tag, value: energised ? rung.analogOutput.value : 0 }
+          : null
+      };
     });
     const programOutputs = Object.fromEntries(program.rungs.map(rung => [rung.coil, outputs[rung.coil]]));
-    return { valid: true, rungStates, outputs: programOutputs };
+    return {
+      valid: true, rungStates, outputs: programOutputs,
+      runtimeState: { timers, counters }, analogOutputs
+    };
   }
 
   return {

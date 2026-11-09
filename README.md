@@ -2,7 +2,7 @@
 
 Static, offline-capable training workspace for electrical load sizing, load schedules, BOQs, component selection, low-voltage electronics design, circuit simulation, and troubleshooting exercises.
 
-The current browser experience remains usable offline. Supabase integration is prepared through [supabase-config.js](./supabase-config.js) and the migration in [supabase/schema.sql](./supabase/schema.sql); configure those before enabling account-backed project storage.
+The current browser experience remains usable offline. Optional Supabase sign-in, cohort membership, cloud project submission, instructor review, and a class dashboard are implemented but inactive until a Supabase project is configured. Apply the reviewed SQL in [supabase/schema.sql](./supabase/schema.sql), then set the project URL and public anon key in [supabase-config.js](./supabase-config.js). Never place a service-role key in the browser app.
 
 ## Development
 
@@ -31,6 +31,16 @@ npm run check
 ```
 
 There is also a dependency-free browser test page at `tests/browser-test.html`.
+Run its integration checks in Chromium with:
+
+```powershell
+npm ci
+npx playwright install chromium
+npm run test:browser
+```
+
+The CI workflow runs these browser checks in addition to the Node.js tests and
+syntax checks.
 
 ## Offline support
 
@@ -49,7 +59,9 @@ The protected-lamp walkthrough checks each component and connection in sequence 
 
 ## PLC simulator
 
-The PLC Simulator includes editable ladder-logic examples for a seal-in motor starter, an interlocked conveyor, and a tank pump. Toggle simulated digital inputs, edit NO/NC contacts and output coils, add series contacts, parallel branches, and rungs, then execute one scan or a continuous scan loop. The scan model evaluates series as AND and parallel branches as OR, exposes the output image, and plots recent output states. Training faults can force an input on/off or inhibit an output channel. The active program and input states are saved locally on the device.
+The PLC Simulator includes editable ladder-logic examples for a seal-in motor starter, an interlocked conveyor, a tank pump, and analog level control. Toggle simulated digital inputs and scaled 0–100% analog inputs; edit NO/NC contacts, analog comparisons, output coils and setpoints; add series contacts, parallel branches, rungs, TON timers, and CTU counters. Run a single scan or a continuous scan loop to observe the I/O image, timer/counter states, a rung-by-rung scan explanation, and digital output trend. Training faults can force a digital input on/off or inhibit an output channel. Three ladder challenges run defined test sequences against the current program, and three evidence-led troubleshooting cases record attempts and completion offline.
+
+PLC programs are saved on-device and can be exported/imported as JSON. They are also included in named project saves, project revisions and comparisons, project import/export, review submissions, unified engineering reports, and training review exports. PLC challenge and troubleshooting progress appears in the dashboard and learner summary.
 
 This is a browser-based teaching model, not a PLC IDE, target runtime, safety controller, or commissioning tool. Its scan timing and I/O are illustrative only. Never use it to design, test, commission, bypass, or operate real machinery or safety functions.
 
@@ -63,7 +75,7 @@ Three-phase load schedules assign each circuit to Phase A, B, or C and report ph
 
 ## Offline project storage
 
-Named projects contain the BOQ, load schedule, cable-sizing inputs, and circuit diagram together, with up to ten previous snapshots retained as revisions. Loading a project or revision restores its sizing inputs and recalculates the result; students must save sizing-input edits before submitting. Projects are written to IndexedDB for larger offline-safe storage and mirrored to localStorage as a compatibility fallback. Use **Export project** and **Import project** to move a complete project between devices without a server.
+Named projects contain the BOQ, load schedule, cable-sizing inputs, and circuit diagram together, with up to ten previous snapshots retained as revisions. Loading a project or revision restores its sizing inputs and recalculates the result; students must save sizing-input edits before submitting. Projects are written to IndexedDB for larger offline-safe storage and mirrored to localStorage as a compatibility fallback. Use **Export project** and **Import project** to move a complete project between devices without a server. The Profile module also exports a versioned full-device JSON backup of known academy storage and validates it before restoring; restore replaces the academy data on that browser, so save the current device state first. Keep backup files private.
 
 ## Guided learning and review
 
@@ -71,9 +83,30 @@ The Lessons module provides practical circuit exercises with hints, offline prog
 
 Offline profiles support student, instructor, and administrator roles. Saved projects can be reviewed locally, marked approved, or returned for changes; reviewer name and timestamps are stored with the project.
 
-The project workspace can export a unified engineering report containing the calculation, motor feeder estimate, load schedule, installation record, BOQ, circuit validation, review history, and learning progress. Saved project revisions can be compared and restored to the workspace before saving; comparisons include BOQ, circuit components and connections, load schedule, motor design, installation checks, and review status. Students submit saved work for review; instructors approve or request changes with comments and a resubmission history; administrators can manage the local project directory. Troubleshooting attempts and completed scenarios are stored offline and included in the student progress summary.
+The project workspace can export a unified engineering report as JSON or PDF containing the calculation, motor feeder estimate, load schedule, installation record, BOQ, circuit validation, review history, and learning progress. Reports explicitly state that their estimates have not been independently validated for standards compliance. Saved project revisions can be compared and restored to the workspace before saving; comparisons include BOQ, circuit components and connections, load schedule, motor design, installation checks, and review status. Students submit saved work for review; instructors approve or request changes with comments and a resubmission history; administrators can manage the local project directory. Troubleshooting attempts and completed scenarios are stored offline and included in the student progress summary.
 
-Role selection and role-based controls are local workflow conveniences only; this static offline application does not authenticate users or enforce authorization against a server. Do not use them as a security boundary for confidential student records.
+Offline role selection and role-based controls are local workflow conveniences only and must not be used as a security boundary. When Supabase is configured, cloud authorization is based on the server-managed profile and cohort membership policies, not on the local role selector. Until a project is configured, the cloud dashboard and server-side authorization are unavailable. Have a qualified electrical designer review the calculation methods against the applicable local standard before relying on them for any real project.
+
+The Installation & Commissioning module includes a standards-basis and external-review record for the jurisdiction, exact standard and edition, amendments, reviewer credentials, declaration, evidence references, and reviewer-entered topic outcomes. Nigeria and the NEMSA NESIS Regulations 2015 are prefilled as a proposed basis, alongside source links supplied for NEMSA, IEC, ECOWAS, SON, and ECREEE. The supplied NESIS document identifies user-site requirements in scope and references BS 7671:2008 and NIS IEC documents; the supplied 2023 ECOWAS PDF is the ECOWAS Energy Policy, not a wiring-installation code.
+
+A public-source check found that NEMSA's 2025 accreditation certificate (valid through 24 July 2029) lists NESIS 2015 among its applicable documents, strong evidence of current NEMSA administrative use. NESIS was made under the EPSR Act 2005, and the sources reviewed did not conclusively establish its formal legal continuation under the Electricity Act 2023. The supplied NESIS text references BS 7671:2008; the IET now publishes BS 7671:2018+A4:2026, but that UK publication does not automatically amend Nigeria's cited edition. SON's [Digital Standards Platform](https://nnsdp.son.gov.ng/) is the official access point for Nigerian Industrial Standards; current NIS IEC and NCP 09 edition/amendment records were not publicly verified here.
+
+NEMSA publishes category-based individual and corporate installer certification routes, including qualifications and experience evidence; the corporate engineer route includes interview/examination. The reviewer record now has a field for a self-reported NEMSA category/authorization reference. The specific category, validity, work scope, and authority to sign a particular installation certificate still need direct verification with NEMSA. A degree or self-declaration alone is not proof of authorization.
+
+The app's preliminary calculator crosswalk cites NESIS clauses for demand/diversity, conductors and voltage drop, protective devices, motors, earthing, and verification. It highlights a review question: NESIS distinguishes diversity for final sub-circuits from other circuits, while the training schedule currently applies user-entered diversity factors generically. It also notes that the demo cable/breaker tables and installation factors are not traced to approved standard tables, and that no prospective-fault-current/device-curve calculation or physical test is performed. These are review questions and potential gaps, not a completed compliance assessment. All calculation formulas remain unchanged pending an authorized review and a documented design basis.
+
+The standards record is autosaved locally, travels with named projects and revisions, is included in full-device backups, and appears in unified JSON/PDF reports. It does not verify credentials or citations, calculate compliance, or certify a design. Do not mark an outcome as acceptable unless a qualified reviewer has assessed the project evidence against the governing requirements. No electrical sizing formulas are presented as code-compliant by this workflow.
+
+### Enabling optional cloud accounts
+
+1. Create a Supabase project and apply [supabase/schema.sql](./supabase/schema.sql) in its SQL editor.
+2. Copy the project URL and public anon/publishable key into [supabase-config.js](./supabase-config.js). These browser-visible values are not secrets; database permissions must remain enforced by RLS.
+3. Configure Supabase Auth's site URL and redirect allowlist for the deployed app, then invite users through Supabase Auth. Use the standard hosted confirmation flow so verification credentials return in the URL fragment; do not configure email templates or redirects to put `token_hash` values in the query string. Invitation and recovery links return to the app, where users must set a 12-character-minimum password. Profiles are created as students by default. A trusted project administrator must assign instructor roles in the database; never let a browser choose its server role.
+4. An instructor signs in, creates a cohort, and shares its invite code with enrolled students. Students sign in and join using that code. Cloud submissions and review actions are checked by database policies and triggers.
+
+The browser keeps its access and refresh tokens in session-scoped storage, not in full-device backups. Use HTTPS in deployment. The local profile role remains editable and is never the cloud authorization source. Instructor cohort views are limited by RLS to their memberships; review actions are recorded by a database trigger. Apply the migration to a test Supabase project and verify its policies before using real learner records.
+
+Keyboard users can move through controls using visible focus indicators. The interface honors reduced-motion preferences and exposes the skip link and live status messages. These improvements do not by themselves establish conformance to WCAG; test with assistive technology before making an accessibility-conformance claim.
 
 The circuit toolbox also includes a five-second timer relay and a manually toggled relay. Timer components begin open and close after the simulated delay; relay components can be toggled during a simulation. Building fault scenarios cover motor overloads, intermittent lighting, and heat-damaged outlets as well as timer and relay faults. The separate Power Station Diagnostics Lab uses evidence-led scenarios for generator and transformer protection, excitation and voltage regulation, prime movers, rotating equipment, auxiliary systems, and grid disturbances. It practices correlating alarms, time-sequenced events, trends, independent indications, and specialist escalation; cases and progress are stored offline and included in training exports.
 
@@ -97,7 +130,7 @@ Use [RELEASE_CHECKLIST.md](./RELEASE_CHECKLIST.md) for production releases and p
 
 ## Deployment
 
-The [Deploy static app](./.github/workflows/deploy-pages.yml) workflow publishes the repository through GitHub Pages. Enable Pages with **GitHub Actions** as the source in repository settings.
+The [Deploy static app](./.github/workflows/deploy-pages.yml) workflow publishes only the app entry point, runtime scripts/styles, and vendored assets through GitHub Pages. Enable Pages with **GitHub Actions** as the source in repository settings.
 
 Production site: [https://tharix.github.io/dangote/](https://tharix.github.io/dangote/)
 

@@ -22,48 +22,100 @@ test('rejects invalid load factors', () => {
   const result = calculateLoadSizing({
     phase: 1, loadType: 'kw', loadValue: 10, pf: 1.2, diversity: .8, installMethod: 'clipped'
   });
-
-  test('PLC scans evaluate series and parallel branches and latch from the prior output image', () => {
-    const program = {
-      rungs: [{
-        branches: [
-          [{ tag: 'I0.0', normallyClosed: false }, { tag: 'I0.1', normallyClosed: false }],
-          [{ tag: 'Q0.0', normallyClosed: false }, { tag: 'I0.1', normallyClosed: false }]
-        ],
-        coil: 'Q0.0'
-      }]
-    };
-    assert.equal(validatePlcProgram(program).valid, true);
-    const started = calculatePlcScan(program, { 'I0.0': true, 'I0.1': true }, {});
-    assert.equal(started.outputs['Q0.0'], true);
-    const held = calculatePlcScan(program, { 'I0.0': false, 'I0.1': true }, started.outputs);
-    assert.equal(held.outputs['Q0.0'], true);
-    const stopped = calculatePlcScan(program, { 'I0.0': false, 'I0.1': false }, held.outputs);
-    assert.equal(stopped.outputs['Q0.0'], false);
-  });
-
-  test('PLC scan supports normally-closed contacts and rejects invalid programs or images', () => {
-    const program = { rungs: [{ branches: [[{ tag: 'I0.2', normallyClosed: true }]], coil: 'Q0.1' }] };
-    assert.equal(calculatePlcScan(program, { 'I0.2': false }, {}).outputs['Q0.1'], true);
-    assert.equal(calculatePlcScan(program, { 'I0.2': true }, {}).outputs['Q0.1'], false);
-    assert.equal(calculatePlcScan(program, { 'I0.2': 1 }, {}).valid, false);
-    assert.equal(validatePlcProgram({ rungs: [
-      { branches: [[{ tag: 'I0.0', normallyClosed: false }]], coil: 'Q0.0' },
-      { branches: [[{ tag: 'I0.1', normallyClosed: false }]], coil: 'Q0.0' }
-    ] }).valid, false);
-  });
-
-  test('PLC later rungs read outputs evaluated earlier in the same scan', () => {
-    const result = calculatePlcScan({
-      rungs: [
-        { branches: [[{ tag: 'I0.0', normallyClosed: false }]], coil: 'Q0.0' },
-        { branches: [[{ tag: 'Q0.0', normallyClosed: false }]], coil: 'Q0.1' }
-      ]
-    }, { 'I0.0': true }, {});
-    assert.equal(result.outputs['Q0.0'], true);
-    assert.equal(result.outputs['Q0.1'], true);
-  });
   assert.equal(result.valid, false);
+});
+
+test('PLC scans evaluate series and parallel branches and latch from the prior output image', () => {
+  const program = {
+    rungs: [{
+      branches: [
+        [{ tag: 'I0.0', normallyClosed: false }, { tag: 'I0.1', normallyClosed: false }],
+        [{ tag: 'Q0.0', normallyClosed: false }, { tag: 'I0.1', normallyClosed: false }]
+      ],
+      coil: 'Q0.0'
+    }]
+  };
+  assert.equal(validatePlcProgram(program).valid, true);
+  const started = calculatePlcScan(program, { 'I0.0': true, 'I0.1': true }, {});
+  assert.equal(started.outputs['Q0.0'], true);
+  const held = calculatePlcScan(program, { 'I0.0': false, 'I0.1': true }, started.outputs);
+  assert.equal(held.outputs['Q0.0'], true);
+  const stopped = calculatePlcScan(program, { 'I0.0': false, 'I0.1': false }, held.outputs);
+  assert.equal(stopped.outputs['Q0.0'], false);
+});
+
+test('PLC scan supports normally-closed contacts and rejects invalid programs or images', () => {
+  const program = { rungs: [{ branches: [[{ tag: 'I0.2', normallyClosed: true }]], coil: 'Q0.1' }] };
+  assert.equal(calculatePlcScan(program, { 'I0.2': false }, {}).outputs['Q0.1'], true);
+  assert.equal(calculatePlcScan(program, { 'I0.2': true }, {}).outputs['Q0.1'], false);
+  assert.equal(calculatePlcScan(program, { 'I0.2': 1 }, {}).valid, false);
+  assert.equal(validatePlcProgram({ rungs: [
+    { branches: [[{ tag: 'I0.0', normallyClosed: false }]], coil: 'Q0.0' },
+    { branches: [[{ tag: 'I0.1', normallyClosed: false }]], coil: 'Q0.0' }
+  ] }).valid, false);
+});
+
+test('PLC later rungs read outputs evaluated earlier in the same scan', () => {
+  const result = calculatePlcScan({
+    rungs: [
+      { branches: [[{ tag: 'I0.0', normallyClosed: false }]], coil: 'Q0.0' },
+      { branches: [[{ tag: 'Q0.0', normallyClosed: false }]], coil: 'Q0.1' }
+    ]
+  }, { 'I0.0': true }, {});
+  assert.equal(result.outputs['Q0.0'], true);
+  assert.equal(result.outputs['Q0.1'], true);
+});
+
+test('PLC TON timer accumulates energized scans, exposes done, and resets when de-energized', () => {
+  const program = { rungs: [
+    { branches: [[{ tag: 'I0.0', normallyClosed: false }]], coil: 'Q0.0', timer: { tag: 'T0', presetScans: 2 } },
+    { branches: [[{ tag: 'T0.DN', normallyClosed: false }]], coil: 'Q0.1' }
+  ] };
+  const first = calculatePlcScan(program, { 'I0.0': true }, {});
+  assert.equal(first.runtimeState.timers.T0.elapsedScans, 1);
+  assert.equal(first.outputs['Q0.1'], false);
+  const second = calculatePlcScan(program, { 'I0.0': true }, first.outputs, first.runtimeState);
+  assert.equal(second.runtimeState.timers.T0.done, true);
+  assert.equal(second.outputs['Q0.1'], true);
+  const reset = calculatePlcScan(program, { 'I0.0': false }, second.outputs, second.runtimeState);
+  assert.equal(reset.runtimeState.timers.T0.elapsedScans, 0);
+  assert.equal(reset.outputs['Q0.1'], false);
+});
+
+test('PLC CTU counts rising edges once, sets done, and resets from its input', () => {
+  const program = { rungs: [
+    { branches: [[{ tag: 'I0.0', normallyClosed: false }]], coil: 'Q0.0', counter: { tag: 'C0', preset: 2, resetTag: 'I0.5' } },
+    { branches: [[{ tag: 'C0.DN', normallyClosed: false }]], coil: 'Q0.1' }
+  ] };
+  let scan = calculatePlcScan(program, { 'I0.0': true }, {});
+  assert.equal(scan.runtimeState.counters.C0.count, 1);
+  scan = calculatePlcScan(program, { 'I0.0': true }, scan.outputs, scan.runtimeState);
+  assert.equal(scan.runtimeState.counters.C0.count, 1);
+  scan = calculatePlcScan(program, { 'I0.0': false }, scan.outputs, scan.runtimeState);
+  scan = calculatePlcScan(program, { 'I0.0': true }, scan.outputs, scan.runtimeState);
+  assert.equal(scan.runtimeState.counters.C0.count, 2);
+  assert.equal(scan.outputs['Q0.1'], true);
+  scan = calculatePlcScan(program, { 'I0.0': true, 'I0.5': true }, scan.outputs, scan.runtimeState);
+  assert.equal(scan.runtimeState.counters.C0.count, 0);
+  assert.equal(scan.outputs['Q0.1'], false);
+});
+
+test('PLC analog comparisons drive digital and analog outputs and reject invalid setpoints', () => {
+  const program = { rungs: [{
+    branches: [[{ tag: 'AI0', normallyClosed: false, analogOperator: 'gte', threshold: 40 }]],
+    coil: 'Q0.0', analogOutput: { tag: 'AQ0', value: 65 }
+  }] };
+  const low = calculatePlcScan(program, {}, {}, {}, { AI0: 39.9 });
+  const high = calculatePlcScan(program, {}, {}, {}, { AI0: 40 });
+  assert.equal(low.outputs['Q0.0'], false);
+  assert.equal(low.analogOutputs.AQ0, 0);
+  assert.equal(high.outputs['Q0.0'], true);
+  assert.equal(high.analogOutputs.AQ0, 65);
+  assert.equal(calculatePlcScan(program, { 'I0.9': true }, {}).valid, false);
+  assert.equal(validatePlcProgram({ rungs: [{
+    branches: [[{ tag: 'AI0', normallyClosed: false, analogOperator: 'gte', threshold: 40 }]],
+    coil: 'Q0.0', analogOutput: { tag: 'AQ0', value: 101 }
+  }] }).valid, false);
 });
 
 test('rejects unsupported phase, load type, and installation method', () => {

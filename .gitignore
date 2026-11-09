@@ -9,6 +9,8 @@ Thumbs.db
 node_modules/
 coverage/
 dist/
+playwright-report/
+test-results/
 *.log
 
 # Local browser state
