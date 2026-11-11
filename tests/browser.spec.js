@@ -3,6 +3,10 @@ const { expect, test } = require('@playwright/test');
 test('browser integration suite passes without runtime errors', async ({ page }) => {
   const pageErrors = [];
   page.on('pageerror', error => pageErrors.push(error.message));
+  await page.route('**/supabase-config.js', route => route.fulfill({
+    contentType: 'application/javascript',
+    body: 'window.DANGOTE_SUPABASE_CONFIG = Object.freeze({ url: "", anonKey: "" });'
+  }));
 
   await page.goto('/tests/browser-test.html');
   await expect(page.locator('#results[data-complete="true"]')).toBeAttached({ timeout: 30000 });
