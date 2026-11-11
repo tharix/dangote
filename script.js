@@ -3,7 +3,13 @@ const moduleTitles = {
   calculators: 'Load & cable sizing',
   'load-schedule': 'Load schedule & design checks',
   'motor-design': 'Three-phase motor feeder estimate',
+  'motor-starter': 'Motor starter control simulator',
   installation: 'Installation & commissioning record',
+  verification: 'Verification practice',
+  'protection-coordination': 'Protection coordination lab',
+  'single-line': 'Single-line diagram builder',
+  renewables: 'Renewable energy learning lab',
+  'learning-paths': 'Electrical learning paths',
   components: 'Component selection wizard',
   boq: 'Bill of quantities',
   'circuit-builder': 'Interactive circuit builder',
@@ -35,6 +41,17 @@ let selectedComponentId = null;
 let simulationSamples = [];
 let projectsChangedDuringStartup = false;
 let circuitWalkthroughIndex = -1;
+let starterSimulation = { running: false, overloadTripped: false, mode: 'dol', stage: 'idle' };
+const verificationStorageKey = 'dangote-academy-verification-practice';
+const singleLineStorageKey = 'dangote-academy-single-line';
+const singleLineTypes = {
+  supply: 'Supply',
+  transformer: 'Transformer',
+  'main-board': 'Main distribution board',
+  protection: 'Protective device',
+  'sub-board': 'Sub-distribution board',
+  load: 'Load group'
+};
 const phaseConductors = ['line', 'phase-a', 'phase-b', 'phase-c'];
 const conductorTypes = [...phaseConductors, 'neutral', 'earth'];
 const circuitWalkthroughSteps = [
@@ -457,6 +474,8 @@ const workspaceBackupStorageKeys = [
   'dangote-academy-boq',
   'dangote-academy-circuit',
   'dangote-academy-installation',
+  verificationStorageKey,
+  singleLineStorageKey,
   'dangote-academy-standards-review',
   'dangote-academy-lessons',
   'dangote-academy-troubleshooting',
@@ -538,6 +557,126 @@ function openModuleSwitcher() {
   renderModuleSwitcherOptions();
   dialog.showModal();
   $('#module-switcher-query').focus();
+}
+
+function getSingleLineElements() {
+  const starter = ['supply', 'main-board', 'protection', 'load'];
+  try {
+    const saved = JSON.parse(localStorage.getItem(singleLineStorageKey) || 'null');
+    if (Array.isArray(saved) && saved.length >= 2 && saved.length <= 12 &&
+        saved.every(item => Object.hasOwn(singleLineTypes, item))) return saved;
+  } catch (error) {
+    console.warn('Saved single-line practice diagram could not be restored; using the starter diagram.', error);
+  }
+  return starter;
+}
+
+function renderSingleLineDiagram() {
+  const elements = getSingleLineElements();
+  const canvas = $('#single-line-canvas');
+  const width = Math.max(640, elements.length * 190);
+  const positions = elements.map((_, index) => 70 + index * 190);
+  const wires = positions.slice(0, -1).map((position, index) =>
+    `<path class="single-line-wire" d="M${position + 48} 82H${positions[index + 1] - 48}"/><circle class="single-line-junction" cx="${positions[index + 1] - 48}" cy="82" r="4"/>`
+  ).join('');
+  const nodes = elements.map((type, index) => {
+    const x = positions[index];
+    return `<g><rect class="single-line-node" x="${x - 48}" y="48" width="96" height="68" rx="10"/><text class="single-line-index" x="${x}" y="70" text-anchor="middle">${String(index + 1).padStart(2, '0')}</text><text class="single-line-label" x="${x}" y="91" text-anchor="middle">${escapeHtml(singleLineTypes[type])}</text></g>`;
+  }).join('');
+  canvas.innerHTML = `<svg viewBox="0 0 ${width} 164" role="img" aria-label="${escapeHtml(elements.map(type => singleLineTypes[type]).join(' connected to '))}"><path class="single-line-bus" d="M${positions[0]} 82H${positions[positions.length - 1]}"/>${wires}${nodes}</svg>`;
+  const hasSource = elements[0] === 'supply';
+  const hasBoard = elements.includes('main-board') || elements.includes('sub-board');
+  const hasProtection = elements.includes('protection');
+  const hasLoad = elements.includes('load');
+  const review = hasSource && hasBoard && hasProtection && hasLoad;
+  $('#single-line-status').textContent = `${elements.length} elements. ${review
+    ? 'The practice chain includes a source, board, protective-device symbol, and load. This is not a technical validation.'
+    : 'For the learning prompt, consider including a source, a board, a protective-device symbol, and a load.'}`;
+  $('#single-line-remove').disabled = elements.length <= 2;
+  $('#single-line-add').disabled = elements.length >= 12;
+}
+
+function updateVerificationPractice() {
+  const checked = $$('#verification-checks input:checked').length;
+  const total = $$('#verification-checks input').length;
+  $('#verification-progress').textContent = `${checked} / ${total}`;
+  const result = $('#verification-summary');
+  if (checked === total) {
+    result.innerHTML = '<p class="eyebrow">Practice status</p><h3>Evidence review complete</h3><p>All practice prompts are marked. This indicates checklist completion only; it is not an inspection result, verification pass, or compliance statement.</p>';
+  } else if (checked > 0) {
+    result.innerHTML = `<p class="eyebrow">Practice status</p><h3>${checked} of ${total} prompts reviewed</h3><p>Continue the instructor-led evidence discussion. Open items still need review; no physical tests were performed.</p>`;
+  } else {
+    result.innerHTML = '<p class="eyebrow">Practice status</p><h3>Start with the evidence</h3><p>Complete the checklist to see a learning-only summary. A complete checklist does not mean an installation has passed verification.</p>';
+  }
+  const state = Object.fromEntries($$('#verification-checks input').map(input => [input.value, input.checked]));
+  localStorage.setItem(verificationStorageKey, JSON.stringify(state));
+}
+
+function restoreVerificationPractice() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(verificationStorageKey) || '{}');
+    const state = saved && typeof saved === 'object' && !Array.isArray(saved) ? saved : {};
+    $$('#verification-checks input').forEach(input => { input.checked = state[input.value] === true; });
+  } catch (error) {
+    console.warn('Saved verification practice checklist could not be restored; opening a blank checklist.', error);
+  }
+  updateVerificationPractice();
+}
+
+function renderStarterSimulation() {
+  const running = starterSimulation.running;
+  const starDelta = starterSimulation.mode === 'star-delta';
+  const starterName = starDelta ? 'Star-delta' : 'Direct-on-line';
+  const stage = !running ? 'idle' : starDelta ? starterSimulation.stage : 'run';
+  const stageLabel = stage === 'star' ? 'star stage' : stage === 'delta' ? 'delta stage' : 'running';
+  $('#starter-state').textContent = starterSimulation.overloadTripped
+    ? 'Stopped · simulated overload'
+    : running ? `${starterName} · ${stageLabel}` : 'Stopped';
+  $('#starter-explanation').textContent = starterSimulation.overloadTripped
+    ? 'The simulated overload input has opened the control permissive. Review why reset is separate from restart.'
+    : running && stage === 'star'
+      ? 'The training sequence is in its initial star stage. Advance the simulated timer to explore the transition concept.'
+      : running
+        ? 'The simulated run command is active. The model contains no real motor, contactors, or safety hardware.'
+        : 'Start is available while the simulated overload is healthy.';
+  $('#starter-run-indicator').textContent = `Motor command: ${running ? 'on' : 'off'}`;
+  $('#starter-stage-indicator').textContent = `Sequence: ${running ? stage : 'idle'}`;
+  $('#starter-overload-indicator').textContent = `Overload input: ${starterSimulation.overloadTripped ? 'tripped' : 'healthy'}`;
+  $('#starter-overload').setAttribute('aria-pressed', String(starterSimulation.overloadTripped));
+  $('#starter-transition').hidden = !(running && starDelta && stage === 'star');
+  $('#starter-start').disabled = running || starterSimulation.overloadTripped;
+}
+
+function compareProtectionExample(event) {
+  event.preventDefault();
+  const downstream = Number($('#coord-downstream').value);
+  const upstream = Number($('#coord-upstream').value);
+  const faultLevel = Number($('#coord-fault-level').value);
+  const breakingCapacity = Number($('#coord-breaking-capacity').value);
+  if (![downstream, upstream, faultLevel, breakingCapacity].every(Number.isFinite) || !event.currentTarget.reportValidity()) return;
+  const ratingOrder = upstream > downstream;
+  const capacityCheck = breakingCapacity >= faultLevel;
+  $('#coordination-result').innerHTML = `<p class="eyebrow">Learning result</p><h3>${ratingOrder ? 'Nominal rating order shown' : 'Review nominal rating order'}</h3><p>${ratingOrder
+    ? 'The upstream nominal rating is greater than the downstream rating in this example.'
+    : 'The upstream nominal rating is not greater than the downstream rating in this example.'} ${capacityCheck
+    ? 'The entered breaking-capacity value is at least the illustrative fault-level value.'
+    : 'The entered breaking-capacity value is below the illustrative fault-level value and needs investigation in a real design.'}</p><p><strong>Not determined:</strong> selectivity, discrimination, device suitability, or installation safety. Compare manufacturer curves and verify the actual design independently.</p>`;
+}
+
+function calculateRenewablesExample(event) {
+  event.preventDefault();
+  const dailyEnergy = Number($('#renew-daily-energy').value);
+  const sunHours = Number($('#renew-sun-hours').value);
+  const systemYield = Number($('#renew-system-yield').value);
+  const autonomy = Number($('#renew-autonomy').value);
+  const voltage = Number($('#renew-battery-voltage').value);
+  const usableFraction = Number($('#renew-usable-fraction').value);
+  const values = [dailyEnergy, sunHours, systemYield, autonomy, voltage, usableFraction];
+  if (!values.every(Number.isFinite) || !event.currentTarget.reportValidity()) return;
+  const arrayPowerKw = dailyEnergy / (sunHours * systemYield);
+  const nominalBatteryKwh = dailyEnergy * autonomy / usableFraction;
+  const nominalBatteryAh = nominalBatteryKwh * 1000 / voltage;
+  $('#renewables-result').innerHTML = `<p class="eyebrow">Illustrative learning estimate</p><h3>Compare the energy and storage concepts</h3><div class="learning-metrics"><span><small>PV array estimate</small><strong>${arrayPowerKw.toFixed(2)} kW</strong></span><span><small>Nominal battery energy</small><strong>${nominalBatteryKwh.toFixed(2)} kWh</strong></span><span><small>Battery at ${voltage.toFixed(0)} V</small><strong>${nominalBatteryAh.toFixed(0)} Ah</strong></span></div><p>These are simplified energy-balance values from the entered assumptions. They do not account for design margins, charge/discharge rates, surge demand, equipment limits, or site conditions.</p>`;
 }
 
 function hasWalkthroughConnection(components, wires, fromTypes, toTypes, conductors) {
@@ -1496,7 +1635,8 @@ function renderDashboard() {
       detail: `Project · ${project.status || 'draft'}`,
       at: project.savedAt,
       icon: 'fa-folder-open',
-      color: 'blue-bg'
+      color: 'blue-bg',
+      projectName: project.name
     }));
   guidedLessons.forEach(lesson => {
     const at = lessons[lesson.id]?.completedAt;
@@ -1562,7 +1702,7 @@ function renderDashboard() {
 
   events.sort((left, right) => Date.parse(right.at) - Date.parse(left.at));
   activity.innerHTML = events.length
-    ? events.slice(0, 5).map(event => `<div class="activity"><span class="activity-icon ${event.color}"><i class="fa-solid ${event.icon}"></i></span><div><strong>${escapeHtml(event.title)}</strong><small>${escapeHtml(event.detail)} · ${escapeHtml(new Date(event.at).toLocaleString())}</small></div></div>`).join('')
+    ? events.slice(0, 5).map(event => `<div class="activity"><span class="activity-icon ${event.color}"><i class="fa-solid ${event.icon}"></i></span><div><strong>${escapeHtml(event.title)}</strong><small>${escapeHtml(event.detail)} · ${escapeHtml(new Date(event.at).toLocaleString())}</small></div>${event.projectName ? `<button class="dashboard-open-project" type="button" data-project-name="${escapeHtml(event.projectName)}" aria-label="Open saved project ${escapeHtml(event.projectName)}">Open</button>` : ''}</div>`).join('')
     : '<p class="dashboard-empty">Your saved projects, completed lessons, and solved scenarios will appear here.</p>';
 }
 
@@ -2724,6 +2864,7 @@ function saveNamedProject() {
   $('#project-list').value = name;
   renderRevisionControls(name);
   renderReview();
+  renderDashboard();
   showToast(`Project saved: ${name}`);
 }
 
@@ -2913,6 +3054,21 @@ function validateWorkspaceBackup(backup) {
     }
     JSON.parse(value);
   });
+  if (backup.storage[singleLineStorageKey] !== undefined) {
+    const diagram = JSON.parse(backup.storage[singleLineStorageKey]);
+    if (!Array.isArray(diagram) || diagram.length < 2 || diagram.length > 12 ||
+        !diagram.every(item => Object.hasOwn(singleLineTypes, item))) {
+      throw new Error('Workspace single-line practice diagram is invalid.');
+    }
+  }
+  if (backup.storage[verificationStorageKey] !== undefined) {
+    const checks = JSON.parse(backup.storage[verificationStorageKey]);
+    const allowedChecks = new Set(['scope', 'visual', 'protective', 'instrument', 'results', 'actions']);
+    if (!checks || typeof checks !== 'object' || Array.isArray(checks) ||
+        Object.entries(checks).some(([key, value]) => !allowedChecks.has(key) || typeof value !== 'boolean')) {
+      throw new Error('Workspace verification practice checklist is invalid.');
+    }
+  }
   const projects = backup.storage['dangote-academy-projects'];
   if (projects !== undefined) {
     const parsedProjects = JSON.parse(projects);
@@ -4837,6 +4993,9 @@ function initialise() {
   renderStationDiagnostics();
   renderElectronicsDiagnostics();
   renderLessons();
+  renderSingleLineDiagram();
+  restoreVerificationPractice();
+  renderStarterSimulation();
   renderReview();
   applyRoleControls();
   renderAdminTools();
@@ -4851,9 +5010,90 @@ function initialise() {
     lessonButton.scrollIntoView({ behavior: 'smooth', block: 'center' });
     lessonButton.focus({ preventScroll: true });
   }));
+  $('#dashboard-activity').addEventListener('click', event => {
+    const button = event.target.closest('.dashboard-open-project');
+    if (!button) return;
+    const project = getSavedProjects().find(item => item.name === button.dataset.projectName);
+    if (!project) {
+      showToast('This saved project is no longer available on this device.');
+      renderDashboard();
+      return;
+    }
+    switchModule('boq');
+    refreshProjectList();
+    $('#project-list').value = project.name;
+    loadNamedProject();
+    $('#project-name').focus({ preventScroll: true });
+  });
   $('#open-module-switcher').addEventListener('click', openModuleSwitcher);
   $('#close-module-switcher').addEventListener('click', () => $('#module-switcher').close());
   $('#module-switcher-query').addEventListener('input', event => renderModuleSwitcherOptions(event.currentTarget.value));
+  $('#verification-checks').addEventListener('change', updateVerificationPractice);
+  $('#verification-reset').addEventListener('click', () => {
+    $$('#verification-checks input').forEach(input => { input.checked = false; });
+    updateVerificationPractice();
+  });
+  $('#verification-print').addEventListener('click', () => {
+    document.body.classList.add('printing-practice-report');
+    window.addEventListener('afterprint', () => document.body.classList.remove('printing-practice-report'), { once: true });
+    window.print();
+  });
+  $('#single-line-add').addEventListener('click', () => {
+    const elements = getSingleLineElements();
+    if (elements.length >= 12) return;
+    elements.push($('#single-line-component').value);
+    localStorage.setItem(singleLineStorageKey, JSON.stringify(elements));
+    renderSingleLineDiagram();
+  });
+  $('#single-line-remove').addEventListener('click', () => {
+    const elements = getSingleLineElements();
+    if (elements.length <= 2) return;
+    elements.pop();
+    localStorage.setItem(singleLineStorageKey, JSON.stringify(elements));
+    renderSingleLineDiagram();
+  });
+  $('#single-line-reset').addEventListener('click', () => {
+    localStorage.setItem(singleLineStorageKey, JSON.stringify(['supply', 'main-board', 'protection', 'load']));
+    renderSingleLineDiagram();
+  });
+  $('#coordination-form').addEventListener('submit', compareProtectionExample);
+  $('#coordination-form').addEventListener('input', () => {
+    $('#coordination-result').innerHTML = '<p class="eyebrow">Learning result</p><h3>Inputs changed</h3><p>Run the comparison again. This remains a limited classroom concept check, not a protection-device selection or coordination study.</p>';
+  });
+  $('#renewables-form').addEventListener('submit', calculateRenewablesExample);
+  $('#renewables-form').addEventListener('input', () => {
+    $('#renewables-result').innerHTML = '<p class="eyebrow">Learning result</p><h3>Inputs changed</h3><p>Run the estimate again to update the simplified energy-balance values.</p>';
+  });
+  $('#starter-mode').addEventListener('change', event => {
+    starterSimulation = { running: false, overloadTripped: false, mode: event.currentTarget.value, stage: 'idle' };
+    renderStarterSimulation();
+  });
+  $('#starter-start').addEventListener('click', () => {
+    if (starterSimulation.overloadTripped) return;
+    starterSimulation.running = true;
+    starterSimulation.stage = starterSimulation.mode === 'star-delta' ? 'star' : 'run';
+    renderStarterSimulation();
+  });
+  $('#starter-stop').addEventListener('click', () => {
+    starterSimulation.running = false;
+    starterSimulation.stage = 'idle';
+    renderStarterSimulation();
+  });
+  $('#starter-overload').addEventListener('click', () => {
+    starterSimulation.overloadTripped = true;
+    starterSimulation.running = false;
+    starterSimulation.stage = 'idle';
+    renderStarterSimulation();
+  });
+  $('#starter-reset-overload').addEventListener('click', () => {
+    starterSimulation.overloadTripped = false;
+    renderStarterSimulation();
+  });
+  $('#starter-transition').addEventListener('click', () => {
+    if (!starterSimulation.running || starterSimulation.mode !== 'star-delta' || starterSimulation.stage !== 'star') return;
+    starterSimulation.stage = 'delta';
+    renderStarterSimulation();
+  });
   $('#module-switcher-options').addEventListener('click', event => {
     const option = event.target.closest('.module-switcher-option');
     if (!option) return;

@@ -59,6 +59,12 @@ Undo/redo is available for diagram edits, and fault modes simulate open circuits
 
 The protected-lamp walkthrough checks each component and connection in sequence without replacing the learner's canvas. Virtual multimeter readings use the simplified simulator's values; continuity reports only whether the classroom topology validates and requires the simulation to be stopped. The oscilloscope displays idealized AC, DC, or no-signal traces. Neither instrument represents physical probes or measured equipment, and these displays must never guide live electrical work.
 
+## Additional learning labs
+
+The learning paths connect existing lessons with five classroom activities: verification evidence review, a protection-rating concept check, a saved single-line diagram sequence, a motor starter state simulator, and a basic off-grid PV/battery energy estimate. Single-line practice and verification checklist state are saved locally and included in workspace backup data.
+
+These activities are deliberately limited learning aids. The verification checklist is not a field-test procedure or compliance certificate; the protection comparison does not establish coordination or selectivity; the single-line builder is not a construction drawing; the motor starter has no physical I/O or safety functions; and renewable estimates omit site and equipment design factors. Do not use any of their outputs to design, test, install, or operate real electrical systems.
+
 ## PLC simulator
 
 The PLC Simulator includes editable ladder-logic examples for a seal-in motor starter, an interlocked conveyor, a tank pump, and analog level control. Toggle simulated digital inputs and scaled 0–100% analog inputs; edit NO/NC contacts, analog comparisons, output coils and setpoints; add series contacts, parallel branches, rungs, TON timers, and CTU counters. Run a single scan or a continuous scan loop to observe the I/O image, timer/counter states, a rung-by-rung scan explanation, and digital output trend. Training faults can force a digital input on/off or inhibit an output channel. Three ladder challenges run defined test sequences against the current program, and three evidence-led troubleshooting cases record attempts and completion offline.

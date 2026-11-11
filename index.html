@@ -9,12 +9,12 @@
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:; connect-src 'self' https://*.supabase.co; object-src 'none'; base-uri 'self'; form-action 'self';">
   <title>Dangote Academy Electrical</title>
   <link rel="stylesheet" href="assets/vendor/fontawesome/fontawesome.min.css">
-  <link rel="stylesheet" href="styles.css?v=20261111-learning-shortcuts1">
+  <link rel="stylesheet" href="styles.css?v=20261111-academy-labs1">
   <script src="assets/vendor/jspdf/jspdf.umd.min.js" defer></script>
   <script src="assets/vendor/jspdf/jspdf.plugin.autotable.min.js" defer></script>
   <script src="supabase-config.js" defer></script>
   <script src="core.js?v=20261109-auth-fragment1" defer></script>
-  <script src="script.js?v=20261111-learning-shortcuts1" defer></script>
+  <script src="script.js?v=20261111-academy-labs1" defer></script>
 </head>
 <body>
   <a class="skip-link" href="#main-content">Skip to main content</a>
@@ -31,16 +31,22 @@
         <button class="nav-item" data-module="calculators"><i class="fa-solid fa-calculator"></i><span>Load & Cable Sizing</span></button>
         <button class="nav-item" data-module="load-schedule"><i class="fa-solid fa-list-check"></i><span>Load Schedule</span></button>
         <button class="nav-item" data-module="motor-design"><i class="fa-solid fa-gears"></i><span>Motor Feeder Design</span></button>
+        <button class="nav-item" data-module="protection-coordination"><i class="fa-solid fa-shield-halved"></i><span>Protection Coordination</span></button>
+        <button class="nav-item" data-module="single-line"><i class="fa-solid fa-diagram-project"></i><span>Single-Line Builder</span></button>
+        <button class="nav-item" data-module="renewables"><i class="fa-solid fa-solar-panel"></i><span>Renewables Lab</span></button>
         <button class="nav-item" data-module="installation"><i class="fa-solid fa-helmet-safety"></i><span>Installation Planner</span></button>
         <button class="nav-item" data-module="components"><i class="fa-solid fa-microchip"></i><span>Component Selector</span></button>
         <button class="nav-item" data-module="boq"><i class="fa-solid fa-file-invoice-dollar"></i><span>BOQ Generator</span></button>
         <p class="nav-label">Simulation</p>
         <button class="nav-item" data-module="circuit-builder"><i class="fa-solid fa-network-wired"></i><span>Circuit Builder</span></button>
         <button class="nav-item" data-module="plc-lab"><i class="fa-solid fa-microchip"></i><span>PLC Simulator</span></button>
+        <button class="nav-item" data-module="motor-starter"><i class="fa-solid fa-toggle-on"></i><span>Motor Starter Lab</span></button>
+        <button class="nav-item" data-module="verification"><i class="fa-solid fa-clipboard-check"></i><span>Verification Practice</span></button>
         <button class="nav-item" data-module="troubleshooting"><i class="fa-solid fa-screwdriver-wrench"></i><span>Troubleshooting</span></button>
         <button class="nav-item" data-module="station-diagnostics"><i class="fa-solid fa-industry"></i><span>Power Station Lab</span></button>
         <button class="nav-item" data-module="electronics-lab"><i class="fa-solid fa-microchip"></i><span>Electronics Lab</span></button>
         <button class="nav-item" data-module="lessons"><i class="fa-solid fa-graduation-cap"></i><span>Lessons</span></button>
+        <button class="nav-item" data-module="learning-paths"><i class="fa-solid fa-route"></i><span>Learning Paths</span></button>
         <button class="nav-item" data-module="review"><i class="fa-solid fa-clipboard-check"></i><span>Instructor Review</span></button>
         <button class="nav-item" data-module="profile"><i class="fa-solid fa-user"></i><span>Profile</span></button>
         <p class="nav-label">Resources</p>
@@ -368,6 +374,91 @@
           </section>
           <h3 class="electronics-cases-heading">Low-voltage troubleshooting cases</h3>
           <div class="troubleshooting-grid" id="electronics-diagnostic-results"></div>
+        </section>
+
+        <section class="module" id="module-verification">
+          <div class="section-heading"><div><p class="eyebrow accent">Guided classroom exercise</p><h2>Verification practice</h2><p class="muted">Practice documenting a supervised, simulated verification workflow and identify what evidence a competent reviewer needs.</p></div><span class="demo-note">Training record only</span></div>
+          <aside class="learning-safety"><i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i><p><strong>Not a field-test procedure or compliance certificate.</strong> This checklist records learning steps only. Do not use it to inspect, test, or energize an installation. Real work requires competent persons, suitable procedures, approved instruments, and applicable local requirements.</p></aside>
+          <div class="feature-grid verification-grid">
+            <article class="panel"><div class="panel-heading"><div><p class="eyebrow">Practice record</p><h3>Evidence review checklist</h3></div><span class="score-pill" id="verification-progress">0 / 6</span></div><p class="muted feature-intro">Mark items only after discussing the sample documentation with an instructor. No measurements are taken or generated here.</p>
+              <div class="verification-checks" id="verification-checks">
+                <label><input type="checkbox" value="scope"> Installation scope and circuit schedule reviewed</label>
+                <label><input type="checkbox" value="visual"> Visual inspection observations recorded</label>
+                <label><input type="checkbox" value="protective"> Protective-device details cross-checked against the design brief</label>
+                <label><input type="checkbox" value="instrument"> Instrument identification and calibration evidence reviewed</label>
+                <label><input type="checkbox" value="results"> Instructor-provided sample results reviewed against stated criteria</label>
+                <label><input type="checkbox" value="actions"> Open observations assigned for competent follow-up</label>
+              </div>
+              <div class="button-row feature-actions"><button class="secondary-button" type="button" id="verification-reset">Reset practice</button><button class="primary-button" type="button" id="verification-print"><i class="fa-solid fa-print" aria-hidden="true"></i> Print practice summary</button></div>
+            </article>
+            <article class="panel learning-result" id="verification-summary" role="status" aria-live="polite"><p class="eyebrow">Practice status</p><h3>Start with the evidence</h3><p>Complete the checklist to see a learning-only summary. A complete checklist does not mean an installation has passed verification.</p></article>
+          </div>
+          <details class="context-help"><summary>What does IEC 60364-6 cover?</summary><p>IEC 60364-6 addresses verification of low-voltage electrical installations. This classroom exercise does not reproduce the standard, its test methods, or acceptance limits. Consult the current adopted edition and qualified local guidance for actual work.</p></details>
+        </section>
+
+        <section class="module" id="module-protection-coordination">
+          <div class="section-heading"><div><p class="eyebrow accent">Interactive design concepts</p><h2>Protection coordination lab</h2><p class="muted">Explore current-rating order and short-circuit breaking-capacity concepts using a deliberately limited training example.</p></div><span class="demo-note">Concept check, not selection advice</span></div>
+          <aside class="learning-safety"><i class="fa-solid fa-circle-info" aria-hidden="true"></i><p>This simplified check cannot establish selectivity, discrimination, or safe device selection. Real coordination needs the actual device data, installation conditions, fault study, and manufacturer time-current/energy curves checked by a competent designer.</p></aside>
+          <form class="panel learning-form" id="coordination-form">
+            <div class="learning-form-grid">
+              <div class="field-with-help"><label for="coord-downstream">Downstream device rating (A)<input id="coord-downstream" type="number" min="1" max="6300" step="1" value="16" required></label><details class="field-help"><summary>Why it matters</summary><p>Used only to compare the two entered nominal current ratings in this exercise.</p></details></div>
+              <div class="field-with-help"><label for="coord-upstream">Upstream device rating (A)<input id="coord-upstream" type="number" min="1" max="6300" step="1" value="63" required></label><details class="field-help"><summary>Why it matters</summary><p>A larger upstream rating alone does not prove that only the downstream device will operate during a fault.</p></details></div>
+              <div class="field-with-help"><label for="coord-fault-level">Illustrative fault level (kA)<input id="coord-fault-level" type="number" min="0.1" max="100" step="0.1" value="6" required></label><details class="field-help"><summary>Why it matters</summary><p>Classroom value for comparison only; do not treat it as a calculated installation fault current.</p></details></div>
+              <div class="field-with-help"><label for="coord-breaking-capacity">Device breaking capacity (kA)<input id="coord-breaking-capacity" type="number" min="0.1" max="100" step="0.1" value="10" required></label><details class="field-help"><summary>Why it matters</summary><p>Check the exact device datasheet, voltage, and installation conditions in a real design.</p></details></div>
+            </div>
+            <button class="primary-button" type="submit">Compare the example</button>
+          </form>
+          <article class="panel learning-result" id="coordination-result" role="status" aria-live="polite"><p class="eyebrow">Learning result</p><h3>Enter example values</h3><p>The exercise will show a basic rating comparison and remind you what it cannot determine.</p></article>
+        </section>
+
+        <section class="module" id="module-single-line">
+          <div class="section-heading"><div><p class="eyebrow accent">Diagram workspace</p><h2>Single-line diagram builder</h2><p class="muted">Arrange a simplified supply path and practice naming the main parts of a distribution system.</p></div><span class="demo-note">Classroom schematic only</span></div>
+          <aside class="learning-safety"><i class="fa-solid fa-circle-info" aria-hidden="true"></i><p>This symbol-chain builder does not model ratings, wiring, fault levels, isolation, earthing, or code compliance. It is not an installation drawing. Use the existing circuit builder for terminal-level circuit exercises.</p></aside>
+          <article class="panel single-line-panel">
+            <div class="single-line-controls"><label for="single-line-component">Add a diagram element</label><select id="single-line-component"><option value="supply">Utility / generator source</option><option value="transformer">Transformer</option><option value="main-board">Main distribution board</option><option value="protection">Protective device</option><option value="sub-board">Sub-distribution board</option><option value="load">Load group</option></select><button class="primary-button" type="button" id="single-line-add">Add element</button><button class="secondary-button" type="button" id="single-line-remove">Remove last</button><button class="text-button" type="button" id="single-line-reset">Reset diagram</button></div>
+            <div class="single-line-canvas" id="single-line-canvas" role="img" aria-label="Starter single-line diagram"></div>
+            <p class="single-line-status" id="single-line-status" role="status" aria-live="polite"></p>
+            <details class="context-help"><summary>How to read this drawing</summary><p>A single-line diagram uses one line to represent an electrical path, often with symbols for multiple conductors or equipment. This practice canvas is a visual sequence only and omits the details needed for construction or verification.</p></details>
+          </article>
+        </section>
+
+        <section class="module" id="module-motor-starter">
+          <div class="section-heading"><div><p class="eyebrow accent">Control logic practice</p><h2>Motor starter simulator</h2><p class="muted">Explore how simulated start, stop, overload, and star-delta transition states affect a training control sequence.</p></div><span class="demo-note">No real I/O or motor control</span></div>
+          <aside class="learning-safety"><i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i><p>Simulation only. This is not a wiring diagram, safety circuit, PLC program, motor-sizing tool, or commissioning procedure. Never connect this model to real machinery or use it to bypass protective functions.</p></aside>
+          <div class="feature-grid">
+            <article class="panel"><div class="panel-heading"><div><p class="eyebrow">Simulated inputs</p><h3>Operate the sequence</h3></div><label class="starter-mode">Starter type<select id="starter-mode"><option value="dol">Direct-on-line concept</option><option value="star-delta">Star-delta sequence concept</option></select></label></div>
+              <div class="starter-controls"><button class="primary-button" id="starter-start" type="button"><i class="fa-solid fa-play" aria-hidden="true"></i> Start</button><button class="secondary-button" id="starter-stop" type="button"><i class="fa-solid fa-stop" aria-hidden="true"></i> Stop</button><button class="secondary-button" id="starter-overload" type="button" aria-pressed="false">Simulate overload</button><button class="secondary-button" id="starter-reset-overload" type="button">Reset simulated overload</button><button class="secondary-button" id="starter-transition" type="button" hidden>Advance to delta</button></div>
+              <p class="muted feature-intro">Buttons change fictional input states only; there are no outputs to a physical device.</p>
+            </article>
+            <article class="panel learning-result starter-result" id="starter-result" role="status" aria-live="polite"><p class="eyebrow">Simulated state</p><h3 id="starter-state">Stopped</h3><p id="starter-explanation">Start is available while the simulated overload is healthy.</p><div class="starter-indicators"><span id="starter-run-indicator">Motor command: off</span><span id="starter-stage-indicator">Sequence: idle</span><span id="starter-overload-indicator">Overload input: healthy</span></div></article>
+          </div>
+        </section>
+
+        <section class="module" id="module-renewables">
+          <div class="section-heading"><div><p class="eyebrow accent">Energy concepts</p><h2>Renewable energy learning lab</h2><p class="muted">Explore how daily energy, peak-sun-hours, system yield, and battery autonomy affect a simple off-grid estimate.</p></div><span class="demo-note">Illustrative estimate only</span></div>
+          <aside class="learning-safety"><i class="fa-solid fa-circle-info" aria-hidden="true"></i><p>This basic model omits site weather, shading, temperature, wiring, charge-controller limits, battery chemistry, surge loads, protection, and local rules. Do not use it to purchase or install equipment. Have a complete design reviewed by a qualified professional.</p></aside>
+          <form class="panel learning-form" id="renewables-form">
+            <div class="learning-form-grid">
+              <div class="field-with-help"><label for="renew-daily-energy">Daily energy use (kWh)<input id="renew-daily-energy" type="number" min="0.1" max="10000" step="0.1" value="5" required></label><details class="field-help"><summary>Why it matters</summary><p>Example energy consumed in one day; use a measured or course-supplied value for practice.</p></details></div>
+              <div class="field-with-help"><label for="renew-sun-hours">Peak sun hours per day<input id="renew-sun-hours" type="number" min="0.1" max="24" step="0.1" value="4.5" required></label><details class="field-help"><summary>Why it matters</summary><p>Illustrative equivalent full-sun hours, not daylight duration or a site-specific solar resource assessment.</p></details></div>
+              <div class="field-with-help"><label for="renew-system-yield">Overall system yield (0-1)<input id="renew-system-yield" type="number" min="0.1" max="1" step="0.01" value="0.75" required></label><details class="field-help"><summary>Why it matters</summary><p>A single teaching factor for combined losses. Real losses need a system-specific analysis.</p></details></div>
+              <div class="field-with-help"><label for="renew-autonomy">Battery autonomy (days)<input id="renew-autonomy" type="number" min="0.1" max="30" step="0.1" value="1" required></label><details class="field-help"><summary>Why it matters</summary><p>Number of example days of energy storage; actual autonomy depends on the system and operating policy.</p></details></div>
+              <div class="field-with-help"><label for="renew-battery-voltage">Nominal battery voltage (V)<input id="renew-battery-voltage" type="number" min="12" max="1000" step="1" value="48" required></label><details class="field-help"><summary>Why it matters</summary><p>Used to convert the example battery energy to amp-hours; it does not select compatible equipment.</p></details></div>
+              <div class="field-with-help"><label for="renew-usable-fraction">Usable battery fraction (0-1)<input id="renew-usable-fraction" type="number" min="0.1" max="1" step="0.01" value="0.8" required></label><details class="field-help"><summary>Why it matters</summary><p>Simplified share of nominal battery energy available in the exercise; chemistry and manufacturer limits vary.</p></details></div>
+            </div>
+            <button class="primary-button" type="submit"><i class="fa-solid fa-sun" aria-hidden="true"></i> Estimate the example</button>
+          </form>
+          <article class="panel learning-result" id="renewables-result" role="status" aria-live="polite"><p class="eyebrow">Learning result</p><h3>Enter example values</h3><p>Run the estimate to compare a simplified array size and nominal battery capacity.</p></article>
+        </section>
+
+        <section class="module" id="module-learning-paths">
+          <div class="section-heading"><div><p class="eyebrow accent">Choose a route</p><h2>Electrical learning paths</h2><p class="muted">Short, connected routes help learners know what to practice next. Your existing lesson and scenario progress stays on this device.</p></div><span class="demo-note"><i class="fa-solid fa-hard-drive" aria-hidden="true"></i> Offline progress</span></div>
+          <div class="learning-path-grid">
+            <article class="panel learning-path-card"><span class="path-level">FOUNDATIONS</span><h3>From circuit basics to diagrams</h3><p>Learn symbols, sketch a protected circuit, then describe its operating path.</p><ol><li>Review practical circuit lessons</li><li>Build and validate a circuit</li><li>Arrange the system as a single-line diagram</li></ol><button class="primary-button" data-go="lessons" type="button">Start foundations</button></article>
+            <article class="panel learning-path-card"><span class="path-level">INSTALLATION CONCEPTS</span><h3>From loads to verification records</h3><p>Practice a classroom planning sequence and learn where evidence and qualified review matter.</p><ol><li>Explore load and cable sizing</li><li>Compare protection concepts</li><li>Complete verification practice</li></ol><button class="primary-button" data-go="calculators" type="button">Start planning route</button></article>
+            <article class="panel learning-path-card"><span class="path-level">MACHINES & ENERGY</span><h3>From control logic to energy</h3><p>Study simulated motor-control states, then explore basic renewable-energy calculations.</p><ol><li>Review motor feeder concepts</li><li>Operate the motor starter simulator</li><li>Estimate an example off-grid system</li></ol><button class="primary-button" data-go="motor-design" type="button">Start machines route</button></article>
+          </div>
+          <details class="context-help"><summary>How progress is tracked</summary><p>Existing lessons and diagnostic scenarios save progress on this device. These suggested routes are navigation guides and do not award certificates or assert competency.</p></details>
         </section>
 
         <section class="module" id="module-lessons"><div class="section-heading"><div><p class="eyebrow accent">Guided learning</p><h2>Practical circuit lessons</h2><p class="muted">Complete each exercise, review the hint, and export your progress for instructor review.</p></div><div class="button-row"><span class="score-pill">Progress <b id="lesson-score">0</b>/3</span><button class="secondary-button" id="export-review">Export review</button></div></div><div class="progress-summary panel" id="student-progress-summary"></div><div class="lesson-grid" id="lesson-results"></div></section>

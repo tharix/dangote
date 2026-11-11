@@ -118,3 +118,122 @@ test('dashboard continues at the first unfinished lesson and points to review wh
   await continueButton.click();
   await expect(page.locator('#module-review')).toHaveClass(/active/);
 });
+
+test('verification practice saves checklist progress without implying a pass', async ({ page }) => {
+  await page.goto('/');
+  await page.locator('.nav-item[data-module="verification"]').click();
+  await page.locator('#verification-checks input[value="scope"]').check();
+  await expect(page.locator('#verification-progress')).toHaveText('1 / 6');
+  await expect(page.locator('#verification-summary')).toContainText('1 of 6 prompts reviewed');
+  await page.reload();
+  await page.locator('.nav-item[data-module="verification"]').click();
+  await expect(page.locator('#verification-checks input[value="scope"]')).toBeChecked();
+  for (const checkbox of await page.locator('#verification-checks input').all()) await checkbox.check();
+  await expect(page.locator('#verification-summary')).toContainText('checklist completion only');
+  await expect(page.locator('#verification-summary')).not.toContainText('passed verification');
+  await page.locator('#verification-reset').click();
+  await expect(page.locator('#verification-progress')).toHaveText('0 / 6');
+});
+
+test('protection concept check compares entered ratings and invalidates stale output', async ({ page }) => {
+  await page.goto('/');
+  await page.locator('.nav-item[data-module="protection-coordination"]').click();
+  await page.locator('#coordination-form button[type="submit"]').click();
+  await expect(page.locator('#coordination-result')).toContainText('Nominal rating order shown');
+  await expect(page.locator('#coordination-result')).toContainText('at least the illustrative fault-level');
+  await expect(page.locator('#coordination-result')).toContainText('selectivity');
+  await page.locator('#coord-upstream').fill('10');
+  await expect(page.locator('#coordination-result')).toContainText('Inputs changed');
+  await page.locator('#coordination-form button[type="submit"]').click();
+  await expect(page.locator('#coordination-result')).toContainText('Review nominal rating order');
+});
+
+test('single-line builder edits and restores a constrained classroom diagram', async ({ page }) => {
+  await page.goto('/');
+  await page.locator('.nav-item[data-module="single-line"]').click();
+  const canvas = page.locator('#single-line-canvas');
+  await expect(canvas).toContainText('Supply');
+  await expect(page.locator('#single-line-status')).toContainText('not a technical validation');
+  await page.locator('#single-line-component').selectOption('transformer');
+  await page.locator('#single-line-add').click();
+  await expect(canvas).toContainText('Transformer');
+  await expect(canvas.locator('svg')).toHaveAttribute('aria-label', /Transformer/);
+  await page.reload();
+  await page.locator('.nav-item[data-module="single-line"]').click();
+  await expect(canvas).toContainText('Transformer');
+  await page.locator('#single-line-remove').click();
+  await expect(canvas).not.toContainText('Transformer');
+  await page.locator('#single-line-reset').click();
+  await expect(canvas).not.toContainText('Transformer');
+  const backupValidation = await page.evaluate(() => {
+    const backup = window.createWorkspaceBackup();
+    const includesDiagram = Object.hasOwn(backup.storage, 'dangote-academy-single-line');
+    backup.storage['dangote-academy-single-line'] = '["supply","unknown"]';
+    try {
+      window.validateWorkspaceBackup(backup);
+      return { includesDiagram, rejectsInvalidDiagram: false };
+    } catch {
+      return { includesDiagram, rejectsInvalidDiagram: true };
+    }
+  });
+  expect(backupValidation).toEqual({ includesDiagram: true, rejectsInvalidDiagram: true });
+});
+
+test('motor starter simulation handles start, overload reset, and star-delta transition', async ({ page }) => {
+  await page.goto('/');
+  await page.locator('.nav-item[data-module="motor-starter"]').click();
+  await page.locator('#starter-start').click();
+  await expect(page.locator('#starter-state')).toHaveText(/Direct-on-line/);
+  await page.locator('#starter-overload').click();
+  await expect(page.locator('#starter-state')).toContainText('simulated overload');
+  await expect(page.locator('#starter-run-indicator')).toHaveText('Motor command: off');
+  await page.locator('#starter-reset-overload').click();
+  await page.locator('#starter-mode').selectOption('star-delta');
+  await page.locator('#starter-start').click();
+  await expect(page.locator('#starter-stage-indicator')).toHaveText('Sequence: star');
+  await page.locator('#starter-transition').click();
+  await expect(page.locator('#starter-stage-indicator')).toHaveText('Sequence: delta');
+  await expect(page.locator('#starter-state')).toContainText('delta stage');
+});
+
+test('renewables estimate reports expected classroom energy calculations', async ({ page }) => {
+  await page.goto('/');
+  await page.locator('.nav-item[data-module="renewables"]').click();
+  await page.locator('#renewables-form button[type="submit"]').click();
+  await expect(page.locator('#renewables-result')).toContainText('1.48 kW');
+  await expect(page.locator('#renewables-result')).toContainText('6.25 kWh');
+  await expect(page.locator('#renewables-result')).toContainText('130 Ah');
+  await page.locator('#renew-system-yield').fill('0.5');
+  await expect(page.locator('#renewables-result')).toContainText('Inputs changed');
+  await page.locator('#renewables-form button[type="submit"]').click();
+  await expect(page.locator('#renewables-result')).toContainText('2.22 kW');
+});
+
+test('learning paths open their suggested modules and new labs fit mobile width', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/');
+  await page.locator('#menu-toggle').click();
+  await page.locator('.nav-item[data-module="learning-paths"]').click();
+  await expect(page.locator('.learning-path-card')).toHaveCount(3);
+  await page.locator('.learning-path-card').nth(1).locator('button').click();
+  await expect(page.locator('#module-calculators')).toHaveClass(/active/);
+  await page.locator('#menu-toggle').click();
+  await page.locator('.nav-item[data-module="renewables"]').click();
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth);
+  expect(overflow).toBe(false);
+  const formWidth = await page.locator('#renewables-form').evaluate(element => element.scrollWidth > element.clientWidth);
+  expect(formWidth).toBe(false);
+});
+
+test('dashboard recent project action reopens the saved project workspace', async ({ page }) => {
+  await page.goto('/');
+  await page.locator('.nav-item[data-module="boq"]').click();
+  await page.locator('#project-name').fill('Learning path sample');
+  await page.locator('#save-project').click();
+  await expect(page.locator('#dashboard-activity')).toContainText('Project saved: Learning path sample');
+  await page.locator('.nav-item[data-module="dashboard"]').click();
+  await page.locator('.dashboard-open-project').click();
+  await expect(page.locator('#module-boq')).toHaveClass(/active/);
+  await expect(page.locator('#project-name')).toHaveValue('Learning path sample');
+  await expect(page.locator('#project-list')).toHaveValue('Learning path sample');
+});
