@@ -12,8 +12,8 @@ Use this checklist before publishing a production change.
 - [ ] Export and restore a backup with sample data, including an empty project list.
 - [ ] Generate the unified engineering PDF and inspect its sections and circuit page.
 - [ ] Confirm the standards-review record round-trips with project saves/revisions and reports without claiming app-verified compliance.
-- [ ] Confirm NESIS's legal basis/scope under the Electricity Act 2023, applicable BS/NIS IEC/NCP 09 editions, and reviewer certification/signing authority directly with NEMSA/SON before any formula change.
-- [ ] Have an authorized reviewer resolve diversity treatment, cable tables, protection calculations, motor rules, earthing, and installation verification requirements before any formula change.
+- [ ] Treat the project owner's 2026-11-11 standards review as self-reported; record exact controlled editions, Nigerian adoption/legal basis, reviewer authorization/scope, and calculation-by-calculation evidence before any compliance claim or formula change.
+- [ ] Resolve the missing IEC 60364-6 edition, incomplete surge-protection reference, load-diversity basis, and motor-design basis against the applicable Nigerian requirements.
 - [ ] Confirm no electrical sizing formula is described as standards-compliant without documented qualified review.
 - [ ] Check keyboard focus, reduced-motion behavior, and mobile layout.
 - [ ] Confirm no credentials, generated files, or external runtime dependencies were added.

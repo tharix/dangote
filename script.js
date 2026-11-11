@@ -378,13 +378,13 @@ const standardsReviewCrosswalk = [
   {
     topic: 'Cable capacity, installation, and voltage drop',
     model: 'Cable ampacity, installation-method capacity, ambient/grouping factors, and voltage-drop constants are demonstration tables.',
-    references: 'NESIS 2015 section 7.2.3 (PDF pp. 162-164); section 10.3.1(c) (PDF pp. 246-247).',
+    references: 'NESIS 2015 section 7.2.3 (PDF pp. 162-164); section 10.3.1(c) (PDF pp. 246-247). Project-owner-supplied, not independently verified: IEC 60364-5-52:2009 + AMD1:2024 (Edition 3.1); IEC 60287 series, listed core parts IEC 60287-1-1, -1-2, -1-3, and -2-1:2023.',
     review: 'Identify the governing NIS/IEC or other adopted tables and editions; verify conductor type, installation method, correction factors, circuit conditions, and voltage-drop criteria. Current demo constants have no verified standards source.'
   },
   {
     topic: 'Overcurrent and fault protection',
     model: 'Breaker selection compares load current with the demo cable-capacity table; the app does not calculate prospective fault current or device curves.',
-    references: 'NESIS 2015 sections 7.2.11.2, 7.2.14.1 (PDF pp. 200-202, 219-220).',
+    references: 'NESIS 2015 sections 7.2.11.2, 7.2.14.1 (PDF pp. 200-202, 219-220). Project-owner-supplied, not independently verified: IEC 60364-4-41:2005 + AMD1:2017 (Edition 5.1); IEC 60364-4-43:2023 (Edition 4.0); IEC 60947-2:2024 (Edition 6.0); IEC 60909-0:2026 (Edition 3.0).',
     review: 'Assess breaking capacity, short-circuit withstand, discrimination/coordination, conductor protection, device characteristics, and required disconnection conditions. A nominal rating match alone is insufficient evidence.'
   },
   {
@@ -396,14 +396,20 @@ const standardsReviewCrosswalk = [
   {
     topic: 'Earthing, bonding, and earth-leakage protection',
     model: 'Circuit checks are topology heuristics; the app does not calculate earthing, electrode resistance, loop impedance, or RCD trip performance.',
-    references: 'NESIS 2015 Chapter 11, including sections 11.1, 11.5, 11.6 (PDF pp. 252-256); section 10.3.2 (PDF p. 247 onward).',
+    references: 'NESIS 2015 Chapter 11, including sections 11.1, 11.5, 11.6 (PDF pp. 252-256); section 10.3.2 (PDF p. 247 onward). Project-owner-supplied, not independently verified: IEC 60364-4-41:2005 + AMD1:2017 (Edition 5.1); IEC 60364-5-54:2011 + AMD1:2021 (Edition 3.1).',
     review: 'Identify the applicable earthing arrangement and adopted rules; independently review conductor sizing, bonding, fault protection, device selection, and required measured test evidence.'
   },
   {
     topic: 'Inspection and verification',
     model: 'The application stores user-entered installation notes and produces training reports; it performs no physical inspection or electrical tests.',
-    references: 'NESIS 2015 sections 10.3.1-10.3.2 (PDF pp. 246-248 onward).',
+    references: 'NESIS 2015 sections 10.3.1-10.3.2 (PDF pp. 246-248 onward). Project-owner-supplied, not independently verified: IEC 60364-6 (edition/year not supplied).',
     review: 'Have an authorized competent person determine applicable inspection, test methods, sequence, acceptance criteria, certification, and authority approvals for the actual installation.'
+  },
+  {
+    topic: 'Surge protection',
+    model: 'The application does not assess surge-protection requirements or select surge protective devices.',
+    references: 'The project owner supplied the incomplete reference “IEC 60364-4”; a complete part and edition were not provided.',
+    review: 'Identify the complete applicable standard, edition, adoption, and project-specific assessment before using this tool for surge-protection decisions.'
   },
   {
     topic: 'Document status and applicable editions',
