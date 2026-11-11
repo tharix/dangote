@@ -4,6 +4,8 @@ Static, offline-capable training workspace for electrical load sizing, load sche
 
 The current browser experience remains usable offline. Optional Supabase sign-in, cohort membership, cloud project submission, instructor review, and a class dashboard are implemented but inactive until a Supabase project is configured. Apply the reviewed SQL in [supabase/schema.sql](./supabase/schema.sql), then set the project URL and public anon key in [supabase-config.js](./supabase-config.js). Never place a service-role key in the browser app.
 
+To find a workspace section quickly, use **Find a tool** in the top bar or press **Ctrl+K** (**Cmd+K** on macOS), then search by name.
+
 ## Development
 
 The application has no build step. Serve the project directory with any static web server:

@@ -492,6 +492,52 @@ function switchModule(moduleId) {
   $$('.module').forEach(module => module.classList.toggle('active', module.id === `module-${moduleId}`));
   $('#module-title').textContent = moduleTitles[moduleId] || moduleTitles.dashboard;
   $('#sidebar').classList.remove('open');
+  $('#menu-toggle').setAttribute('aria-expanded', 'false');
+}
+
+function renderModuleSwitcherOptions(query = '') {
+  const options = $('#module-switcher-options');
+  const normalizedQuery = query.trim().toLocaleLowerCase();
+  const modules = $$('.nav-item').map(item => ({
+    id: item.dataset.module,
+    label: item.querySelector('span').textContent.trim(),
+    icon: item.querySelector('i')?.className || '',
+    active: item.classList.contains('active')
+  })).filter(item => item.label.toLocaleLowerCase().includes(normalizedQuery));
+
+  options.replaceChildren();
+  modules.forEach(module => {
+    const button = document.createElement('button');
+    button.className = 'module-switcher-option';
+    button.type = 'button';
+    button.dataset.module = module.id;
+    button.setAttribute('aria-current', module.active ? 'page' : 'false');
+    const icon = document.createElement('i');
+    icon.className = module.icon;
+    icon.setAttribute('aria-hidden', 'true');
+    const label = document.createElement('span');
+    label.textContent = module.label;
+    button.append(icon, label);
+    if (module.active) {
+      const current = document.createElement('small');
+      current.textContent = 'Current';
+      button.append(current);
+    }
+    options.append(button);
+  });
+
+  $('#module-switcher-count').textContent = modules.length
+    ? `${modules.length} ${modules.length === 1 ? 'tool' : 'tools'} found`
+    : 'No tools match that search.';
+}
+
+function openModuleSwitcher() {
+  const dialog = $('#module-switcher');
+  if (dialog.open) return;
+  $('#module-switcher-query').value = '';
+  renderModuleSwitcherOptions();
+  dialog.showModal();
+  $('#module-switcher-query').focus();
 }
 
 function hasWalkthroughConnection(components, wires, fromTypes, toTypes, conductors) {
@@ -4104,9 +4150,17 @@ function getLessonProgress() {
 
 function renderLessons() {
   const progress = getLessonProgress();
+  const nextLesson = guidedLessons.find(lesson => !progress[lesson.id]);
+  const continueButton = $('#dashboard-continue-learning');
+  const continueLabel = $('#dashboard-continue-learning-label');
+  continueButton.dataset.go = nextLesson ? 'lessons' : 'review';
+  continueButton.dataset.lesson = nextLesson?.id || '';
+  continueLabel.textContent = nextLesson ? `Continue: ${nextLesson.title}` : 'Review your progress';
+
   $('#lesson-results').innerHTML = guidedLessons.map(lesson => {
     const completed = Boolean(progress[lesson.id]);
-    return `<article class="lesson-card ${completed ? 'completed' : ''}"><div><span class="eyebrow">Exercise</span><h3>${escapeHtml(lesson.title)}</h3><p>${escapeHtml(lesson.objective)}</p><small><strong>Hint:</strong> ${escapeHtml(lesson.hint)}</small></div><button class="secondary-button lesson-check" data-lesson="${lesson.id}">${completed ? 'Completed' : 'Check exercise'}</button></article>`;
+    const recommended = lesson.id === nextLesson?.id;
+    return `<article class="lesson-card ${completed ? 'completed' : ''} ${recommended ? 'recommended' : ''}"><div><span class="eyebrow">${recommended ? 'Next up' : 'Exercise'}</span><h3>${escapeHtml(lesson.title)}</h3><p>${escapeHtml(lesson.objective)}</p><small><strong>Hint:</strong> ${escapeHtml(lesson.hint)}</small></div><button class="secondary-button lesson-check" data-lesson="${lesson.id}">${completed ? 'Completed' : 'Check exercise'}</button></article>`;
   }).join('');
   $('#lesson-score').textContent = guidedLessons.filter(lesson => progress[lesson.id]).length;
   renderStudentProgressSummary();
@@ -4787,7 +4841,64 @@ function initialise() {
   applyRoleControls();
   renderAdminTools();
   $$('.nav-item').forEach(item => item.addEventListener('click', () => switchModule(item.dataset.module)));
-  $$('[data-go]').forEach(item => item.addEventListener('click', () => switchModule(item.dataset.go)));
+  $$('[data-go]').forEach(item => item.addEventListener('click', () => {
+    switchModule(item.dataset.go);
+    if (item.id !== 'dashboard-continue-learning') return;
+    const lessonButton = item.dataset.lesson
+      ? $(`.lesson-check[data-lesson="${item.dataset.lesson}"]`)
+      : null;
+    if (!lessonButton) return;
+    lessonButton.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    lessonButton.focus({ preventScroll: true });
+  }));
+  $('#open-module-switcher').addEventListener('click', openModuleSwitcher);
+  $('#close-module-switcher').addEventListener('click', () => $('#module-switcher').close());
+  $('#module-switcher-query').addEventListener('input', event => renderModuleSwitcherOptions(event.currentTarget.value));
+  $('#module-switcher-options').addEventListener('click', event => {
+    const option = event.target.closest('.module-switcher-option');
+    if (!option) return;
+    switchModule(option.dataset.module);
+    $('#module-switcher').close();
+    $('#module-title').focus({ preventScroll: true });
+  });
+  $('#module-switcher').addEventListener('click', event => {
+    if (event.target === event.currentTarget) event.currentTarget.close();
+  });
+  $('#module-switcher').addEventListener('keydown', event => {
+    const dialog = event.currentTarget;
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      dialog.close();
+      return;
+    }
+    if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+
+    const options = $$('.module-switcher-option');
+    if (!options.length) return;
+    const currentIndex = options.indexOf(event.target.closest('.module-switcher-option'));
+    if (event.target.id === 'module-switcher-query' && event.key === 'ArrowDown') {
+      event.preventDefault();
+      options[0].focus();
+    } else if (currentIndex >= 0) {
+      event.preventDefault();
+      const direction = event.key === 'ArrowDown' ? 1 : -1;
+      const nextIndex = currentIndex + direction;
+      if (nextIndex >= 0 && nextIndex < options.length) options[nextIndex].focus();
+      else if (event.key === 'ArrowUp') $('#module-switcher-query').focus();
+    }
+  });
+  document.addEventListener('keydown', event => {
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
+      event.preventDefault();
+      openModuleSwitcher();
+      return;
+    }
+    if (event.key === 'Escape' && !$('#module-switcher').open && $('#sidebar').classList.contains('open')) {
+      $('#sidebar').classList.remove('open');
+      $('#menu-toggle').setAttribute('aria-expanded', 'false');
+      $('#menu-toggle').focus();
+    }
+  });
   $('#menu-toggle').addEventListener('click', event => {
     const open = $('#sidebar').classList.toggle('open');
     event.currentTarget.setAttribute('aria-expanded', String(open));
