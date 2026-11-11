@@ -390,8 +390,8 @@ const standardsReviewCrosswalk = [
   {
     topic: 'Motor feeder and starting',
     model: 'Motor estimate uses power, efficiency, power factor, and a user-selected starting-current multiplier.',
-    references: 'NESIS 2015 sections 7.2.11.9, 7.2.14.2 (PDF pp. 209-210, 220).',
-    review: 'Verify the applicable motor and starter rules, nameplate data, starting conditions, conductor sizing, overload/fault protection, isolation, and coordination. The demo multiplier is not a verified limit.'
+    references: 'NESIS 2015 sections 7.2.11.9, 7.2.14.2 (PDF pp. 209-210, 220). Project-owner-supplied, edition/year not provided and not independently verified: IEC 60034-1, IEC 60034-12, IEC 60034-30-1, IEC 60204-1, and NEMA MG 1.',
+    review: 'The supplied motor references cover machine rating/performance, starting, efficiency, and machinery electrical equipment; they are not by themselves a documented feeder-sizing/overcurrent coordination basis. Verify the applicable installation requirements, nameplate data, starting conditions, conductor sizing, overload/fault protection, isolation, and coordination. The demo multiplier is not a verified limit.'
   },
   {
     topic: 'Earthing, bonding, and earth-leakage protection',
@@ -402,14 +402,20 @@ const standardsReviewCrosswalk = [
   {
     topic: 'Inspection and verification',
     model: 'The application stores user-entered installation notes and produces training reports; it performs no physical inspection or electrical tests.',
-    references: 'NESIS 2015 sections 10.3.1-10.3.2 (PDF pp. 246-248 onward). Project-owner-supplied, not independently verified: IEC 60364-6 (edition/year not supplied).',
+    references: 'NESIS 2015 sections 10.3.1-10.3.2 (PDF pp. 246-248 onward). Project-owner-supplied, not independently verified: IEC 60364-6:2016 (Edition 2), with COR1:2017.',
     review: 'Have an authorized competent person determine applicable inspection, test methods, sequence, acceptance criteria, certification, and authority approvals for the actual installation.'
   },
   {
     topic: 'Surge protection',
     model: 'The application does not assess surge-protection requirements or select surge protective devices.',
-    references: 'The project owner supplied the incomplete reference “IEC 60364-4”; a complete part and edition were not provided.',
+    references: 'Project-owner-supplied, edition/year not provided and not independently verified: IEC 60364-4-44 (protection against voltage and electromagnetic disturbances), IEC 60364-5-53 (isolation, switching, and control), and IEC 61643-11 (low-voltage surge protective device requirements and test methods).',
     review: 'Identify the complete applicable standard, edition, adoption, and project-specific assessment before using this tool for surge-protection decisions.'
+  },
+  {
+    topic: 'Load diversity',
+    model: 'Load sizing and schedules use user-entered diversity; no standards-based diversity calculation is implemented.',
+    references: 'No specific load-diversity reference was supplied. IEC 60364-8-1 (energy efficiency) was listed without an edition; its relevance to diversity has not been established.',
+    review: 'Identify the applicable diversity basis and map each circuit/load category to controlled requirements and documented assumptions before treating schedule demand as a design value.'
   },
   {
     topic: 'Document status and applicable editions',

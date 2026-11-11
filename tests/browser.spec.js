@@ -35,3 +35,14 @@ test('auth callbacks reject query-string verification tokens', async ({ page }) 
   expect(assetReferers.every(referer => !referer)).toBe(true);
   await expect(page.locator('meta[name="referrer"]')).toHaveAttribute('content', 'no-referrer');
 });
+
+test('standards crosswalk records supplied references and open review gaps', async ({ page }) => {
+  await page.goto('/');
+  const crosswalk = page.locator('#standards-crosswalk-list');
+  await expect(crosswalk).toContainText('IEC 60364-6:2016');
+  await expect(crosswalk).toContainText('COR1:2017');
+  await expect(crosswalk).toContainText('IEC 61643-11');
+  await expect(crosswalk).toContainText('Load diversity');
+  await expect(crosswalk).toContainText('No specific load-diversity reference was supplied');
+  await expect(crosswalk).toContainText('NEMA MG 1');
+});
