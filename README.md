@@ -93,7 +93,18 @@ A public-source check found that NEMSA's 2025 accreditation certificate (valid t
 
 NEMSA publishes category-based individual and corporate installer certification routes, including qualifications and experience evidence; the corporate engineer route includes interview/examination. The reviewer record now has a field for a self-reported NEMSA category/authorization reference. The specific category, validity, work scope, and authority to sign a particular installation certificate still need direct verification with NEMSA. A degree or self-declaration alone is not proof of authorization.
 
-The app's preliminary calculator crosswalk cites NESIS clauses for demand/diversity, conductors and voltage drop, protective devices, motors, earthing, and verification. It highlights a review question: NESIS distinguishes diversity for final sub-circuits from other circuits, while the training schedule currently applies user-entered diversity factors generically. It also notes that the demo cable/breaker tables and installation factors are not traced to approved standard tables, and that no prospective-fault-current/device-curve calculation or physical test is performed. These are review questions and potential gaps, not a completed compliance assessment. All calculation formulas remain unchanged pending an authorized review and a documented design basis.
+On 2026-11-11, the project owner self-reported an engineering review covering the listed calculation topics and no findings, and supplied this proposed technical reference map for Nigeria:
+
+- Cable sizing: IEC 60364-5-52:2009 + AMD1:2024 (Edition 3.1) and the IEC 60287 series; the listed core current-rating parts are 2023 editions (IEC 60287-1-1, -1-2, -1-3, and -2-1).
+- Voltage drop: IEC 60364-5-52:2009 + AMD1:2024 (Edition 3.1).
+- Earth-fault loop impedance: IEC 60364-4-41:2005 + AMD1:2017 (Edition 5.1).
+- Overcurrent protection and circuit-breakers: IEC 60364-4-43:2023 (Edition 4.0) and IEC 60947-2:2024 (Edition 6.0).
+- Short-circuit current: IEC 60909-0:2026 (Edition 3.0).
+- Earthing conductors: IEC 60364-5-54:2011 + AMD1:2021 (Edition 3.1).
+- Installation verification: IEC 60364-6 (edition/year not supplied).
+- Surge protection: the supplied reference was incomplete ("IEC 60364-4") and does not identify a complete part or edition.
+
+This is a record of the project owner's statement, not an independently verified standards crosswalk. The supplied information does not identify a separate load-diversity or motor-design reference. It does not establish Nigerian adoption, resolve NESIS's legal status under the Electricity Act 2023, verify controlled editions or amendments, or identify reviewer credentials and signing authority. No detailed calculation-by-calculation evidence was supplied. Accordingly, the review report is not represented as a compliance determination, and the app's formulas and training-only limitations remain unchanged. The demo cable/breaker tables and installation factors are not traced here to approved standard tables; the app does not calculate prospective fault current/device curves or perform physical tests.
 
 The standards record is autosaved locally, travels with named projects and revisions, is included in full-device backups, and appears in unified JSON/PDF reports. It does not verify credentials or citations, calculate compliance, or certify a design. Do not mark an outcome as acceptable unless a qualified reviewer has assessed the project evidence against the governing requirements. No electrical sizing formulas are presented as code-compliant by this workflow.
 
