@@ -345,7 +345,7 @@ test('calculates RC time constant, settling estimate, and cutoff frequency', () 
   assert.equal(result.valid, true);
   assert.equal(result.timeConstant, .1);
   assert.equal(result.approximateSettlingTime, .5);
-  assert.equal(result.cutoffFrequency, 15.915);
+  assert.equal(result.cutoffFrequency, 1.592);
 });
 
 test('rejects RC values outside supported low-voltage learning ranges', () => {

@@ -8,7 +8,7 @@
 <body>
   <h1>Browser tests</h1>
   <ul id="results"></ul>
-  <script src="../core.js?v=20261109-auth-fragment1"></script>
+  <script src="../core.js?v=20261113-rc-cutoff1"></script>
   <iframe id="app" src="../index.html?browser-test=1&v=20261109-auth-fragment1" hidden title="application under test"></iframe>
   <script>
     const results = document.querySelector('#results');
@@ -908,7 +908,8 @@
         app.document.querySelector('#electronics-rc-form').dispatchEvent(new app.Event('submit', { bubbles: true, cancelable: true }));
         const calculationsWorked = app.document.querySelector('#electronics-led-result').textContent.includes('330 Ω') &&
           app.document.querySelector('#electronics-divider-result').textContent.includes('6 V') &&
-          app.document.querySelector('#electronics-rc-result').textContent.includes('0.1 s');
+          app.document.querySelector('#electronics-rc-result').textContent.includes('0.1 s') &&
+          app.document.querySelector('#electronics-rc-result').textContent.includes('1.592 Hz');
         const invalidDesignsRejected = !app.DangoteAcademyCore.calculateLedResistor({
           supplyVoltage: 5, ledVoltage: 5, targetCurrentMa: 10
         }).valid && !app.DangoteAcademyCore.calculateVoltageDivider({

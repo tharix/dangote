@@ -318,7 +318,7 @@
       return { valid: false, error: 'Use resistance from 1 kΩ to 1 MΩ and capacitance from 1 nF to 1000 µF.' };
     }
     const timeConstant = resistance * capacitance;
-    const cutoffFrequency = 1 / (2 * Math.PI * (timeConstant / 10));
+    const cutoffFrequency = 1 / (2 * Math.PI * timeConstant);
     if (![timeConstant, cutoffFrequency].every(Number.isFinite)) {
       return { valid: false, error: 'The RC result exceeds the supported numeric range.' };
     }
